@@ -1,6 +1,6 @@
 {
   "framework": "vite",
-  "installCommand": "npm ci --include=dev",
-  "buildCommand": "npm install --workspaces --include=dev && npm run build -w @system-hunter/shared && npm run build -w @system-hunter/web",
+  "installCommand": "cd apps/web && npm ci --include=dev",
+  "buildCommand": "cd apps/web && npm run build",
   "outputDirectory": "apps/web/dist"
 }
