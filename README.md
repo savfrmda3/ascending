@@ -1,79 +1,72 @@
 # System Hunter
 
-Telegram Bot + Telegram Mini App MVP for an original dark RPG self-development system. The bot is the entry point, the Mini App is the mobile interface, and the API owns the game logic.
+Telegram Bot + Telegram Mini App MVP for a dark RPG self-development system.
 
-## Stack
+The recommended deployment is now one Vercel project:
 
-- Telegram Bot: Node.js, TypeScript, Telegraf
-- Mini App: React, Vite, TypeScript, Tailwind CSS
-- Backend API: Node.js, TypeScript, Express
-- Database: Supabase PostgreSQL
-- Auth: Telegram WebApp `initData` validation + API JWT
-- Deploy targets: Vercel for `apps/web`, Railway/Render/Fly.io for `apps/api` and `apps/bot`
+- `apps/web` builds the Vite Mini App.
+- `apps/web/api` contains Vercel Serverless Functions for the API and Telegram webhook.
+- Supabase remains the database.
+- The old `apps/api` and `apps/bot` packages are kept for local/standalone development, but Vercel does not need separate Railway/Render services.
 
-## Project Structure
+## Vercel Project Settings
 
-```txt
-system-hunter/
-  apps/
-    api/      Express API and game services
-    bot/      Telegraf bot with inline buttons and cron notifications
-    web/      Telegram Mini App
-  packages/
-    shared/   Shared types, zod schemas, RPG formulas, quest templates
-  supabase/
-    migrations/
-    seed.sql
-  .env.example
-  package.json
-```
-
-## Create Telegram Bot
-
-1. Open Telegram and start `@BotFather`.
-2. Run `/newbot`, choose a name and username.
-3. Copy the token into `BOT_TOKEN`.
-4. Run `/setcommands` and add:
+Create one Vercel project from this repository and set:
 
 ```txt
-start - Запустить System Hunter
-menu - Главное меню
-profile - Профиль Hunter
-quests - Квесты на сегодня
-stats - Характеристики
-boss - Босс недели
-help - Помощь
+Framework Preset: Vite
+Root Directory: apps/web
+Install Command: npm ci --include=dev
+Build Command: npm run build
+Output Directory: dist
 ```
 
-5. Use `/setmenubutton` or BotFather Web App settings to point the Menu Button to `MINI_APP_URL`.
-
-## Environment
-
-Copy `.env.example` to `.env` in the `system-hunter` root:
-
-```bash
-cp .env.example .env
-```
-
-Fill:
+Add these environment variables in Vercel Project Settings:
 
 ```env
-BOT_TOKEN=123:telegram-token
-MINI_APP_URL=https://your-mini-app.vercel.app
-BACKEND_URL=http://localhost:4000
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-JWT_SECRET=replace-with-a-long-random-secret
-NODE_ENV=development
-PORT=4000
+BOT_TOKEN=
+MINI_APP_URL=
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+JWT_SECRET=
+WEBHOOK_SETUP_SECRET=
+TELEGRAM_WEBHOOK_SECRET=
+NODE_ENV=production
 ```
 
-Only the API uses `SUPABASE_SERVICE_ROLE_KEY`. Do not expose it in Vercel frontend variables.
+`MINI_APP_URL` is the public Vercel URL of this same project, for example:
+
+```txt
+https://ascending.vercel.app
+```
+
+`BACKEND_URL` is not required for the Vercel setup because the Mini App calls same-origin endpoints like `/api/me`.
+
+## Telegram Setup
+
+1. Create the bot in `@BotFather` with `/newbot`.
+2. Put the token into Vercel env `BOT_TOKEN`.
+3. Deploy the Vercel project.
+4. Put the final Vercel URL into `MINI_APP_URL`.
+5. Open this URL once after deploy:
+
+```txt
+https://YOUR-VERCEL-DOMAIN/api/telegram/setup?secret=YOUR_WEBHOOK_SETUP_SECRET
+```
+
+This sets:
+
+- Telegram webhook: `https://YOUR-VERCEL-DOMAIN/api/telegram/webhook`
+- Bot commands
+- Telegram Menu Button / Web App button URL
+
+If `WEBHOOK_SETUP_SECRET` is empty, the setup URL works without `?secret=...`, but keeping the secret is safer.
+
+In BotFather, the Menu Button / Web App URL should be the same value as `MINI_APP_URL`.
 
 ## Supabase Setup
 
-Apply the migration and seed data:
+Run the migration and seed:
 
 ```bash
 supabase link --project-ref your-project-ref
@@ -81,104 +74,60 @@ supabase db push
 supabase db execute --file supabase/seed.sql
 ```
 
-If you do not use the Supabase CLI, run `supabase/migrations/20260518000000_init_system_hunter.sql` and then `supabase/seed.sql` in the Supabase SQL Editor.
+Without the Supabase CLI, run these files in Supabase SQL Editor:
 
-The migration enables RLS and revokes `anon` / `authenticated` table access. The app talks to Supabase only through the backend service role.
+- `supabase/migrations/20260518000000_init_system_hunter.sql`
+- `supabase/seed.sql`
 
-## Install And Run
+The app uses `SUPABASE_SERVICE_ROLE_KEY` only inside Vercel serverless functions. Do not expose it to browser-side code.
+
+## Local Development
+
+Install and check everything:
 
 ```bash
 npm install
-npm run build -w @system-hunter/shared
+npm run typecheck
+npm run build
+```
+
+Run the old standalone services locally:
+
+```bash
 npm run dev:api
 npm run dev:bot
 npm run dev:web
 ```
 
-Useful scripts:
+For the Vercel-style local flow from `apps/web`, use:
 
 ```bash
-npm run dev        # api + bot + web together
-npm run build      # shared, api, bot, web
-npm run typecheck  # all workspaces
+cd apps/web
+npm run dev
 ```
 
-Local URLs:
+The production Mini App requires Telegram `initData`, so it must be opened from the bot or Telegram menu button. Opening the URL directly in a browser can show a locked/auth state.
 
-- API: `http://localhost:4000/health`
-- Mini App dev server: `http://localhost:5173`
+## Main Endpoints
 
-Outside Telegram, the Mini App shows a development preview when run with Vite dev mode. In production it requires Telegram `initData`.
-
-## API Endpoints
-
-Auth:
-
+- `GET /api/health`
 - `POST /api/auth/telegram`
 - `GET /api/me`
-
-User:
-
 - `GET /api/profile`
 - `GET /api/stats`
-
-Quests:
-
 - `GET /api/quests/today`
 - `POST /api/quests/generate`
 - `POST /api/quests/:id/complete`
 - `POST /api/quests/:id/skip`
-
-Boss:
-
 - `GET /api/boss/current`
 - `POST /api/boss/:id/progress`
-- `POST /api/boss/:id/complete`
-
-Achievements:
-
 - `GET /api/achievements`
-
-Bot internal endpoints use `x-bot-token: BOT_TOKEN`.
-
-## Deploy
-
-Mini App on Vercel:
-
-```bash
-cd apps/web
-vercel
-```
-
-Set `BACKEND_URL` in Vercel environment variables.
-
-API on Railway/Render/Fly.io:
-
-```bash
-npm run build -w @system-hunter/shared
-npm run build -w @system-hunter/api
-npm run start -w @system-hunter/api
-```
-
-Bot on Railway/Render/Fly.io:
-
-```bash
-npm run build -w @system-hunter/shared
-npm run build -w @system-hunter/bot
-npm run start -w @system-hunter/bot
-```
-
-After deploy:
-
-1. Set `BACKEND_URL` to the deployed API URL.
-2. Set `MINI_APP_URL` to the deployed Vercel URL.
-3. Update BotFather Menu Button/Web App URL.
-4. Restart bot and API services.
+- `POST /api/telegram/webhook`
+- `GET /api/telegram/setup?secret=...`
 
 ## Notes
 
-- The project uses original `System Hunter` terminology and custom dark RPG styling.
-- Telegram WebApp auth validates `hash`, `auth_date`, payload integrity, and expiry.
+- Telegram WebApp auth validates `initData` with `BOT_TOKEN`.
+- User sessions are signed with `JWT_SECRET`.
 - XP to next level: `Math.round(100 * Math.pow(level, 1.35))`.
-- Ranks: E, D, C, B, A, S by level ranges.
-- Cron notifications run at 09:00 and 20:00 Europe/Minsk time.
+- The UI uses original System Hunter terminology and does not use copyrighted assets.

@@ -58,10 +58,15 @@ async function request<T>(path: string, init: RequestInit & { auth?: boolean } =
     headers.set("authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers
+    });
+  } catch {
+    throw new Error("Cannot reach backend API. Check Vercel environment variables and /api deployment.");
+  }
   const payload = (await response.json().catch(() => null)) as
     | { data?: T; error?: { message?: string } }
     | null;

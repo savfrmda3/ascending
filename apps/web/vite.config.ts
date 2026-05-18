@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
-      __BACKEND_URL__: JSON.stringify(env.BACKEND_URL ?? env.VITE_BACKEND_URL ?? "http://localhost:4000")
+      __BACKEND_URL__: JSON.stringify(env.BACKEND_URL ?? env.VITE_BACKEND_URL ?? "")
     },
     server: {
       port: 5173
