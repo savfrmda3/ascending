@@ -65,7 +65,7 @@ export async function setupTelegramWebhook(req: ApiRequest) {
   await telegram("setChatMenuButton", {
     menu_button: {
       type: "web_app",
-      text: "Open System",
+      text: "Открыть System Hunter",
       web_app: { url: miniAppUrl }
     }
   });
@@ -193,7 +193,7 @@ async function handleCallback(callback: TelegramCallbackQuery, req: ApiRequest) 
   if (data.startsWith("complete_quest:")) {
     const result = await hunterService.completeQuest(bundle.profile.id, data.split(":")[1] ?? "");
     await editMessage(chatId, messageId, renderQuestCompleted(result), questCompletedKeyboard(req));
-    await answerCallback(callback.id, "Quest completed.");
+    await answerCallback(callback.id, "Квест выполнен.");
     return;
   }
 
@@ -201,7 +201,7 @@ async function handleCallback(callback: TelegramCallbackQuery, req: ApiRequest) 
     await hunterService.skipQuest(bundle.profile.id, data.split(":")[1] ?? "");
     const quests = await hunterService.getTodayQuests(bundle.profile.id);
     await editMessage(chatId, messageId, renderQuests(quests), questsKeyboard(quests, req));
-    await answerCallback(callback.id, "Quest skipped.");
+    await answerCallback(callback.id, "Квест пропущен.");
     return;
   }
 
@@ -220,7 +220,7 @@ async function handleCallback(callback: TelegramCallbackQuery, req: ApiRequest) 
       result.victory ? renderBossVictory(result.boss, result.profile) : renderBoss(result.boss),
       bossKeyboard(result.boss, req)
     );
-    await answerCallback(callback.id, result.victory ? "Boss defeated." : "Boss progress updated.");
+    await answerCallback(callback.id, result.victory ? "Босс побежден." : "Прогресс босса обновлен.");
     return;
   }
 
@@ -299,8 +299,8 @@ function bossKeyboard(boss: WeeklyBoss | null, req: ApiRequest) {
   const bossRows =
     boss?.status === "active"
       ? [
-          [{ text: "Complete Step", callback_data: `boss_progress:${boss.id}` }],
-          [{ text: "Boss Details", callback_data: `boss_details:${boss.id}` }]
+          [{ text: "Засчитать шаг", callback_data: `boss_progress:${boss.id}` }],
+          [{ text: "Детали босса", callback_data: `boss_details:${boss.id}` }]
         ]
       : [];
 
@@ -324,15 +324,15 @@ function helpKeyboard(req: ApiRequest) {
 
 function renderMainMenu(profile: HunterProfile) {
   return [
-    "<b>SYSTEM ONLINE</b>",
+    "<b>СИСТЕМА АКТИВНА</b>",
     "",
-    "Добро пожаловать, Hunter.",
+    "Добро пожаловать, охотник.",
     "Твой профиль активирован.",
     "",
-    `Level: <b>${profile.level}</b>`,
-    `Rank: <b>${profile.rank}</b>`,
+    `Уровень: <b>${profile.level}</b>`,
+    `Ранг: <b>${profile.rank}</b>`,
     `XP: <b>${profile.xp}</b> / ${profile.xpToNextLevel}`,
-    `Streak: <b>${profile.streak}</b> дней`,
+    `Серия: <b>${profile.streak}</b> дней`,
     "",
     "Выбери действие:"
   ].join("\n");
@@ -340,124 +340,124 @@ function renderMainMenu(profile: HunterProfile) {
 
 function renderProfile(profile: HunterProfile) {
   return [
-    "<b>HUNTER PROFILE</b>",
+    "<b>ПРОФИЛЬ ОХОТНИКА</b>",
     "",
-    `Hunter: <b>@${escapeHtml(profile.username ?? "unknown")}</b>`,
-    `Level: <b>${profile.level}</b>`,
-    `Rank: <b>${profile.rank}</b>`,
-    `Class: <b>${escapeHtml(profile.className)}</b>`,
-    `Title: <b>${escapeHtml(profile.currentTitle ?? "None")}</b>`,
+    `Охотник: <b>@${escapeHtml(profile.username ?? "неизвестно")}</b>`,
+    `Уровень: <b>${profile.level}</b>`,
+    `Ранг: <b>${profile.rank}</b>`,
+    `Класс: <b>${escapeHtml(profile.className)}</b>`,
+    `Титул: <b>${escapeHtml(profile.currentTitle ?? "Нет")}</b>`,
     `XP: <b>${profile.xp}</b> / ${profile.xpToNextLevel}`,
-    `Streak: <b>${profile.streak}</b> дней`,
-    `Completed quests: <b>${profile.completedQuestsCount}</b>`
+    `Серия: <b>${profile.streak}</b> дней`,
+    `Выполнено квестов: <b>${profile.completedQuestsCount}</b>`
   ].join("\n");
 }
 
 function renderStats(profile: HunterProfile, stats: UserStats) {
   const rows = Object.entries(STAT_LABELS).map(([key, meta]) => `${meta.short}: <b>${stats[key as keyof UserStats]}</b>`);
-  return [`<b>RPG STATS</b>`, "", `Level: <b>${profile.level}</b> | Rank: <b>${profile.rank}</b>`, "", ...rows].join("\n");
+  return [`<b>RPG-СТАТЫ</b>`, "", `Уровень: <b>${profile.level}</b> | Ранг: <b>${profile.rank}</b>`, "", ...rows].join("\n");
 }
 
 function renderQuests(quests: Quest[]) {
-  if (quests.length === 0) return "<b>Daily Quests</b>\n\nАктивных квестов нет.";
+  if (quests.length === 0) return "<b>Ежедневные квесты</b>\n\nАктивных квестов нет.";
 
   return [
-    "<b>Daily Quests</b>",
+    "<b>Ежедневные квесты</b>",
     "",
     ...quests.flatMap((quest, index) => [
       `${index + 1}. <b>${escapeHtml(quest.title)}</b>`,
-      `Reward: +${quest.xpReward} XP, +${quest.statRewardValue} ${STAT_LABELS[quest.statRewardKey].short}`,
-      `Status: <b>${quest.status}</b>`,
+      `Награда: +${quest.xpReward} XP, +${quest.statRewardValue} ${STAT_LABELS[quest.statRewardKey].short}`,
+      `Статус: <b>${statusLabel(quest.status)}</b>`,
       ""
     ])
   ].join("\n");
 }
 
 function renderQuestDetails(quest: Quest | undefined) {
-  if (!quest) return "<b>Quest Details</b>\n\nКвест не найден.";
+  if (!quest) return "<b>Детали квеста</b>\n\nКвест не найден.";
 
   return [
-    "<b>Quest Details</b>",
+    "<b>Детали квеста</b>",
     "",
     `<b>${escapeHtml(quest.title)}</b>`,
     escapeHtml(quest.description),
     "",
-    `Difficulty: <b>${quest.difficulty}</b>`,
-    `Category: <b>${quest.category}</b>`,
-    `Reward: +${quest.xpReward} XP, +${quest.statRewardValue} ${STAT_LABELS[quest.statRewardKey].short}`,
-    `Status: <b>${quest.status}</b>`
+    `Сложность: <b>${difficultyLabel(quest.difficulty)}</b>`,
+    `Категория: <b>${categoryLabel(quest.category)}</b>`,
+    `Награда: +${quest.xpReward} XP, +${quest.statRewardValue} ${STAT_LABELS[quest.statRewardKey].short}`,
+    `Статус: <b>${statusLabel(quest.status)}</b>`
   ].join("\n");
 }
 
 function renderQuestCompleted(result: any) {
   return [
-    "<b>[ SYSTEM MESSAGE ]</b>",
+    "<b>[ СИСТЕМНОЕ СООБЩЕНИЕ ]</b>",
     "",
-    "Quest completed.",
+    "Квест выполнен.",
     "",
-    "Reward acquired:",
+    "Получена награда:",
     `+${result.rewards.xp} XP`,
     `+${result.rewards.statValue} ${STAT_LABELS[result.rewards.statKey as keyof typeof STAT_LABELS].short}`,
     "",
-    `Current XP: <b>${result.profile.xp}</b> / ${result.profile.xpToNextLevel}`,
-    result.levelUp.leveledUp ? `\n<b>LEVEL UP</b>: ${result.levelUp.from} -> ${result.levelUp.to}` : ""
+    `Текущий XP: <b>${result.profile.xp}</b> / ${result.profile.xpToNextLevel}`,
+    result.levelUp.leveledUp ? `\n<b>УРОВЕНЬ ПОВЫШЕН</b>: ${result.levelUp.from} -> ${result.levelUp.to}` : ""
   ].join("\n");
 }
 
 function renderBoss(boss: WeeklyBoss | null) {
-  if (!boss) return "<b>WEEKLY BOSS</b>\n\nАктивный boss quest не найден.";
+  if (!boss) return "<b>БОСС НЕДЕЛИ</b>\n\nАктивный босс-квест не найден.";
 
   return [
-    "<b>WEEKLY BOSS</b>",
+    "<b>БОСС НЕДЕЛИ</b>",
     "",
-    `Boss: <b>${escapeHtml(boss.name)}</b>`,
+    `Босс: <b>${escapeHtml(boss.name)}</b>`,
     "",
-    `Objective: ${escapeHtml(boss.objective)}`,
-    `Progress: <b>${boss.progress}</b> / ${boss.target}`,
+    `Цель: ${escapeHtml(boss.objective)}`,
+    `Прогресс: <b>${boss.progress}</b> / ${boss.target}`,
     "",
-    `Reward: +${boss.xpReward} XP, +${boss.statRewardValue} ${STAT_LABELS[boss.statRewardKey].short}`,
-    "Title: Focus Hunter",
-    `Status: <b>${boss.status}</b>`
+    `Награда: +${boss.xpReward} XP, +${boss.statRewardValue} ${STAT_LABELS[boss.statRewardKey].short}`,
+    "Титул: Охотник фокуса",
+    `Статус: <b>${statusLabel(boss.status)}</b>`
   ].join("\n");
 }
 
 function renderBossDetails(boss: WeeklyBoss | null) {
-  if (!boss) return "<b>Boss Details</b>\n\nАктивный boss quest не найден.";
+  if (!boss) return "<b>Детали босса</b>\n\nАктивный босс-квест не найден.";
 
   return [
-    "<b>Boss Details</b>",
+    "<b>Детали босса</b>",
     "",
     `<b>${escapeHtml(boss.name)}</b>`,
     escapeHtml(boss.description),
     "",
-    `Objective: ${escapeHtml(boss.objective)}`,
-    `Progress: <b>${boss.progress}</b> / ${boss.target}`,
-    `Reward: +${boss.xpReward} XP, +${boss.statRewardValue} ${STAT_LABELS[boss.statRewardKey].short}`
+    `Цель: ${escapeHtml(boss.objective)}`,
+    `Прогресс: <b>${boss.progress}</b> / ${boss.target}`,
+    `Награда: +${boss.xpReward} XP, +${boss.statRewardValue} ${STAT_LABELS[boss.statRewardKey].short}`
   ].join("\n");
 }
 
 function renderBossVictory(boss: WeeklyBoss, profile: HunterProfile) {
   return [
-    "<b>[ BOSS DEFEATED ]</b>",
+    "<b>[ БОСС ПОВЕРЖЕН ]</b>",
     "",
-    `<b>${escapeHtml(boss.name)}</b> has fallen.`,
+    `<b>${escapeHtml(boss.name)}</b> повержен.`,
     "",
-    `Reward acquired: +${boss.xpReward} XP`,
-    "Title: Focus Hunter",
+    `Получена награда: +${boss.xpReward} XP`,
+    "Титул: Охотник фокуса",
     "",
-    `Current XP: <b>${profile.xp}</b> / ${profile.xpToNextLevel}`
+    `Текущий XP: <b>${profile.xp}</b> / ${profile.xpToNextLevel}`
   ].join("\n");
 }
 
 function renderHelp() {
   return [
-    "<b>HELP</b>",
+    "<b>ПОМОЩЬ</b>",
     "",
     "/menu - главное меню",
     "/profile - профиль",
     "/quests - квесты на сегодня",
     "/stats - характеристики",
-    "/boss - weekly boss",
+    "/boss - босс недели",
     "/help - помощь"
   ].join("\n");
 }
@@ -494,7 +494,7 @@ async function answerCallback(callbackQueryId: string, text?: string) {
 }
 
 async function notifyTelegramError(update: any, error: unknown) {
-  const message = error instanceof Error ? error.message : "Unexpected Telegram bot error";
+  const message = error instanceof Error ? error.message : "Неожиданная ошибка Telegram-бота";
   const callback = update.callback_query as TelegramCallbackQuery | undefined;
   const chatId = callback?.message?.chat?.id ?? update.message?.chat?.id;
 
@@ -508,7 +508,7 @@ async function notifyTelegramError(update: any, error: unknown) {
   }
 
   if (chatId) {
-    await sendMessage(chatId, `<b>[ SYSTEM ERROR ]</b>\n\n${escapeHtml(message)}`, helpKeyboard({ headers: {} }));
+    await sendMessage(chatId, `<b>[ СИСТЕМНАЯ ОШИБКА ]</b>\n\n${escapeHtml(message)}`, helpKeyboard({ headers: {} }));
   }
 }
 
@@ -520,7 +520,7 @@ async function telegram(method: string, body: unknown) {
   });
   const payload = await response.json();
   if (!response.ok || !payload.ok) {
-    throw new Error(payload.description ?? `Telegram ${method} failed`);
+    throw new Error(payload.description ?? `Telegram ${method}: запрос не выполнен`);
   }
   return payload;
 }
@@ -538,6 +538,36 @@ function getPublicBaseUrl(req: ApiRequest) {
 function firstHeader(req: ApiRequest, key: string) {
   const value = req.headers[key] ?? req.headers[key.toLowerCase()];
   return Array.isArray(value) ? value[0] : value;
+}
+
+function statusLabel(status: Quest["status"] | WeeklyBoss["status"]) {
+  const labels: Record<string, string> = {
+    active: "Активен",
+    completed: "Выполнен",
+    skipped: "Пропущен"
+  };
+  return labels[status] ?? status;
+}
+
+function difficultyLabel(difficulty: Quest["difficulty"]) {
+  const labels: Record<Quest["difficulty"], string> = {
+    easy: "Легкий",
+    medium: "Средний",
+    hard: "Сложный"
+  };
+  return labels[difficulty];
+}
+
+function categoryLabel(category: Quest["category"]) {
+  const labels: Record<Quest["category"], string> = {
+    strength: "Сила",
+    intelligence: "Интеллект",
+    vitality: "Здоровье",
+    discipline: "Дисциплина",
+    focus: "Фокус",
+    charisma: "Харизма"
+  };
+  return labels[category];
 }
 
 function escapeHtml(value: string) {

@@ -35,32 +35,32 @@ interface TelegramUserInput {
 
 const ACHIEVEMENTS: Record<string, { title: string; description: string }> = {
   first_quest: {
-    title: "First Quest",
-    description: "Complete your first daily quest."
+    title: "Первый квест",
+    description: "Выполни первый ежедневный квест."
   },
   streak_3: {
-    title: "3 Day Streak",
-    description: "Complete quests three days in a row."
+    title: "Серия 3 дня",
+    description: "Выполняй квесты три дня подряд."
   },
   streak_7: {
-    title: "7 Day Streak",
-    description: "Complete quests seven days in a row."
+    title: "Серия 7 дней",
+    description: "Выполняй квесты семь дней подряд."
   },
   first_level_up: {
-    title: "First Level Up",
-    description: "Reach a new level for the first time."
+    title: "Первое повышение",
+    description: "Получи новый уровень впервые."
   },
   boss_slayer: {
-    title: "Boss Slayer",
-    description: "Defeat your first weekly boss."
+    title: "Победитель босса",
+    description: "Победи первого недельного босса."
   },
   focus_hunter: {
-    title: "Focus Hunter",
-    description: "Complete 10 focus quests."
+    title: "Охотник фокуса",
+    description: "Выполни 10 квестов фокуса."
   },
   discipline_initiate: {
-    title: "Discipline Initiate",
-    description: "Complete 10 discipline quests."
+    title: "Адепт дисциплины",
+    description: "Выполни 10 квестов дисциплины."
   }
 };
 
@@ -288,7 +288,7 @@ export class HunterService {
 
     let unlockedAchievements: Achievement[] = [];
     if (victory) {
-      await this.awardUser(userId, boss.xp_reward, boss.stat_reward_key, boss.stat_reward_value, "Focus Hunter");
+      await this.awardUser(userId, boss.xp_reward, boss.stat_reward_key, boss.stat_reward_value, "Охотник фокуса");
       unlockedAchievements = await this.evaluateAchievements(userId, {
         bossDefeated: true
       });
@@ -489,9 +489,9 @@ export class HunterService {
 
     const { error: insertError } = await supabase.from("weekly_bosses").insert({
       user_id: userId,
-      name: "Devourer of Focus",
-      description: "A pressure-born entity that weakens when you protect deep work blocks.",
-      objective: "Complete 4 deep work sessions.",
+      name: "Пожиратель фокуса",
+      description: "Сущность давления, которая слабеет, когда ты защищаешь блоки глубокой работы.",
+      objective: "Заверши 4 сессии глубокой работы.",
       target: 4,
       xp_reward: XP_REWARDS.boss,
       stat_reward_key: "focus",
@@ -708,7 +708,7 @@ export class HunterService {
         user_id: userId,
         key,
         title: ACHIEVEMENTS[key]?.title ?? key,
-        description: ACHIEVEMENTS[key]?.description ?? "Achievement unlocked."
+        description: ACHIEVEMENTS[key]?.description ?? "Достижение открыто."
       }));
 
     if (rows.length === 0) return [];

@@ -2,15 +2,15 @@ import { STAT_LABELS, xpToNextLevel, type HunterProfile, type Quest, type UserSt
 
 export function renderMainMenu(profile: HunterProfile) {
   return [
-    "<b>SYSTEM ONLINE</b>",
+    "<b>СИСТЕМА АКТИВНА</b>",
     "",
-    "Добро пожаловать, Hunter.",
+    "Добро пожаловать, охотник.",
     "Твой профиль активирован.",
     "",
-    `Level: <b>${profile.level}</b>`,
-    `Rank: <b>${profile.rank}</b>`,
+    `Уровень: <b>${profile.level}</b>`,
+    `Ранг: <b>${profile.rank}</b>`,
     `XP: <b>${profile.xp}</b> / ${profile.xpToNextLevel}`,
-    `Streak: <b>${profile.streak}</b> дней`,
+    `Серия: <b>${profile.streak}</b> дней`,
     "",
     "Выбери действие:"
   ].join("\n");
@@ -18,17 +18,17 @@ export function renderMainMenu(profile: HunterProfile) {
 
 export function renderProfile(profile: HunterProfile) {
   return [
-    "<b>HUNTER PROFILE</b>",
+    "<b>ПРОФИЛЬ ОХОТНИКА</b>",
     "",
-    `Hunter: <b>@${profile.username ?? "unknown"}</b>`,
-    `Level: <b>${profile.level}</b>`,
-    `Rank: <b>${profile.rank}</b>`,
-    `Class: <b>${profile.className}</b>`,
-    `Title: <b>${profile.currentTitle ?? "None"}</b>`,
+    `Охотник: <b>@${profile.username ?? "неизвестно"}</b>`,
+    `Уровень: <b>${profile.level}</b>`,
+    `Ранг: <b>${profile.rank}</b>`,
+    `Класс: <b>${profile.className}</b>`,
+    `Титул: <b>${profile.currentTitle ?? "Нет"}</b>`,
     `XP: <b>${profile.xp}</b> / ${xpToNextLevel(profile.level)}`,
-    `Streak: <b>${profile.streak}</b> дней`,
-    `Completed quests: <b>${profile.completedQuestsCount}</b>`,
-    `Created: <b>${new Date(profile.createdAt).toLocaleDateString("ru-RU")}</b>`
+    `Серия: <b>${profile.streak}</b> дней`,
+    `Выполнено квестов: <b>${profile.completedQuestsCount}</b>`,
+    `Создан: <b>${new Date(profile.createdAt).toLocaleDateString("ru-RU")}</b>`
   ].join("\n");
 }
 
@@ -39,10 +39,10 @@ export function renderStats(profile: HunterProfile, stats: UserStats) {
   });
 
   return [
-    "<b>RPG STATS</b>",
+    "<b>RPG-СТАТЫ</b>",
     "",
-    `Level: <b>${profile.level}</b> | Rank: <b>${profile.rank}</b>`,
-    `Class: <b>${profile.className}</b>`,
+    `Уровень: <b>${profile.level}</b> | Ранг: <b>${profile.rank}</b>`,
+    `Класс: <b>${profile.className}</b>`,
     "",
     ...rows
   ].join("\n");
@@ -50,31 +50,31 @@ export function renderStats(profile: HunterProfile, stats: UserStats) {
 
 export function renderQuests(quests: Quest[]) {
   if (quests.length === 0) {
-    return ["<b>Daily Quests</b>", "", "Активных квестов нет. Запроси новый квест у системы."].join("\n");
+    return ["<b>Ежедневные квесты</b>", "", "Активных квестов нет. Запроси новый квест у системы."].join("\n");
   }
 
   const lines = quests.flatMap((quest, index) => [
     `${index + 1}. <b>${escapeHtml(quest.title)}</b>`,
     `${escapeHtml(quest.description)}`,
-    `Reward: +${quest.xpReward} XP, +${quest.statRewardValue} ${STAT_LABELS[quest.statRewardKey].short}`,
-    `Status: <b>${capitalize(quest.status)}</b>`,
+    `Награда: +${quest.xpReward} XP, +${quest.statRewardValue} ${STAT_LABELS[quest.statRewardKey].short}`,
+    `Статус: <b>${statusLabel(quest.status)}</b>`,
     ""
   ]);
 
-  return ["<b>Daily Quests</b>", "", ...lines].join("\n").trim();
+  return ["<b>Ежедневные квесты</b>", "", ...lines].join("\n").trim();
 }
 
 export function renderQuestDetails(quest: Quest) {
   return [
-    "<b>QUEST DETAILS</b>",
+    "<b>ДЕТАЛИ КВЕСТА</b>",
     "",
     `<b>${escapeHtml(quest.title)}</b>`,
     escapeHtml(quest.description),
     "",
-    `Difficulty: <b>${capitalize(quest.difficulty)}</b>`,
-    `Category: <b>${capitalize(quest.category)}</b>`,
-    `Reward: <b>+${quest.xpReward} XP</b>, +${quest.statRewardValue} ${STAT_LABELS[quest.statRewardKey].short}`,
-    `Status: <b>${capitalize(quest.status)}</b>`
+    `Сложность: <b>${difficultyLabel(quest.difficulty)}</b>`,
+    `Категория: <b>${categoryLabel(quest.category)}</b>`,
+    `Награда: <b>+${quest.xpReward} XP</b>, +${quest.statRewardValue} ${STAT_LABELS[quest.statRewardKey].short}`,
+    `Статус: <b>${statusLabel(quest.status)}</b>`
   ].join("\n");
 }
 
@@ -84,19 +84,19 @@ export function renderQuestCompleted(result: {
   levelUp: { leveledUp: boolean; from: number; to: number };
 }) {
   const levelLine = result.levelUp.leveledUp
-    ? [``, `<b>LEVEL UP</b>: ${result.levelUp.from} -> ${result.levelUp.to}`]
+    ? [``, `<b>УРОВЕНЬ ПОВЫШЕН</b>: ${result.levelUp.from} -> ${result.levelUp.to}`]
     : [];
 
   return [
-    "<b>[ SYSTEM MESSAGE ]</b>",
+    "<b>[ СИСТЕМНОЕ СООБЩЕНИЕ ]</b>",
     "",
-    "Quest completed.",
+    "Квест выполнен.",
     "",
-    "Reward acquired:",
+    "Получена награда:",
     `+${result.rewards.xp} XP`,
     `+${result.rewards.statValue} ${STAT_LABELS[result.rewards.statKey].short}`,
     "",
-    "Current XP:",
+    "Текущий XP:",
     `<b>${result.profile.xp}</b> / ${result.profile.xpToNextLevel}`,
     ...levelLine
   ].join("\n");
@@ -104,48 +104,48 @@ export function renderQuestCompleted(result: {
 
 export function renderBoss(boss: WeeklyBoss | null) {
   if (!boss) {
-    return ["<b>WEEKLY BOSS</b>", "", "Активный boss quest не найден."].join("\n");
+    return ["<b>БОСС НЕДЕЛИ</b>", "", "Активный босс-квест не найден."].join("\n");
   }
 
   return [
-    "<b>WEEKLY BOSS</b>",
+    "<b>БОСС НЕДЕЛИ</b>",
     "",
-    "Boss:",
+    "Босс:",
     `<b>${escapeHtml(boss.name)}</b>`,
     "",
-    "Objective:",
+    "Цель:",
     escapeHtml(boss.objective),
     "",
-    "Progress:",
+    "Прогресс:",
     `<b>${boss.progress}</b> / ${boss.target}`,
     "",
-    "Reward:",
+    "Награда:",
     `+${boss.xpReward} XP`,
     `+${boss.statRewardValue} ${STAT_LABELS[boss.statRewardKey].short}`,
-    "Title: Focus Hunter",
+    "Титул: Охотник фокуса",
     "",
-    `Status: <b>${capitalize(boss.status)}</b>`
+    `Статус: <b>${statusLabel(boss.status)}</b>`
   ].join("\n");
 }
 
 export function renderBossVictory(boss: WeeklyBoss, profile: HunterProfile) {
   return [
-    "<b>[ BOSS DEFEATED ]</b>",
+    "<b>[ БОСС ПОВЕРЖЕН ]</b>",
     "",
-    `<b>${escapeHtml(boss.name)}</b> has fallen.`,
+    `<b>${escapeHtml(boss.name)}</b> повержен.`,
     "",
-    "Reward acquired:",
+    "Получена награда:",
     `+${boss.xpReward} XP`,
     `+${boss.statRewardValue} ${STAT_LABELS[boss.statRewardKey].short}`,
-    "Title: Focus Hunter",
+    "Титул: Охотник фокуса",
     "",
-    `Current XP: <b>${profile.xp}</b> / ${profile.xpToNextLevel}`
+    `Текущий XP: <b>${profile.xp}</b> / ${profile.xpToNextLevel}`
   ].join("\n");
 }
 
 export function renderHelp() {
   return [
-    "<b>HELP</b>",
+    "<b>ПОМОЩЬ</b>",
     "",
     "System Hunter превращает реальные действия в RPG-прогресс.",
     "",
@@ -153,7 +153,7 @@ export function renderHelp() {
     "/profile - профиль",
     "/quests - квесты на сегодня",
     "/stats - характеристики",
-    "/boss - weekly boss",
+    "/boss - босс недели",
     "/help - помощь",
     "",
     "Можно не вводить команды: используй inline-кнопки или Mini App."
@@ -165,8 +165,34 @@ function bar(value: number, max: number) {
   return `[${"#".repeat(filled)}${"-".repeat(10 - filled)}]`;
 }
 
-function capitalize(value: string) {
-  return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
+function statusLabel(status: Quest["status"] | WeeklyBoss["status"]) {
+  const labels: Record<string, string> = {
+    active: "Активен",
+    completed: "Выполнен",
+    skipped: "Пропущен"
+  };
+  return labels[status] ?? status;
+}
+
+function difficultyLabel(difficulty: Quest["difficulty"]) {
+  const labels: Record<Quest["difficulty"], string> = {
+    easy: "Легкий",
+    medium: "Средний",
+    hard: "Сложный"
+  };
+  return labels[difficulty];
+}
+
+function categoryLabel(category: Quest["category"]) {
+  const labels: Record<Quest["category"], string> = {
+    strength: "Сила",
+    intelligence: "Интеллект",
+    vitality: "Здоровье",
+    discipline: "Дисциплина",
+    focus: "Фокус",
+    charisma: "Харизма"
+  };
+  return labels[category];
 }
 
 function escapeHtml(value: string) {

@@ -115,7 +115,7 @@ export function Modal({
             className="grid size-9 place-items-center rounded-md border border-system-border bg-white/5 text-system-muted"
             onClick={onClose}
             type="button"
-            aria-label="Close modal"
+            aria-label="Закрыть окно"
           >
             <X size={18} />
           </button>

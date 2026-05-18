@@ -10,12 +10,12 @@ export const STAT_KEYS: StatKey[] = [
 ];
 
 export const STAT_LABELS: Record<StatKey, { short: string; label: string }> = {
-  strength: { short: "STR", label: "Strength" },
-  intelligence: { short: "INT", label: "Intelligence" },
-  vitality: { short: "VIT", label: "Vitality" },
-  discipline: { short: "DSC", label: "Discipline" },
-  focus: { short: "FOC", label: "Focus" },
-  charisma: { short: "CHA", label: "Charisma" }
+  strength: { short: "STR", label: "Сила" },
+  intelligence: { short: "INT", label: "Интеллект" },
+  vitality: { short: "VIT", label: "Выносливость" },
+  discipline: { short: "DSC", label: "Дисциплина" },
+  focus: { short: "FOC", label: "Фокус" },
+  charisma: { short: "CHA", label: "Харизма" }
 };
 
 export const XP_REWARDS: Record<Difficulty | "boss", number> = {
@@ -72,26 +72,26 @@ export function classForStats(stats: Record<StatKey, number>): string {
 
   switch (best?.[0]) {
     case "strength":
-      return "Iron Vanguard";
+      return "Железный авангард";
     case "intelligence":
-      return "Mind Seeker";
+      return "Искатель разума";
     case "vitality":
-      return "Vital Warden";
+      return "Страж жизненной силы";
     case "discipline":
-      return "Oath Keeper";
+      return "Хранитель обета";
     case "focus":
-      return "Focus Hunter";
+      return "Охотник фокуса";
     case "charisma":
-      return "Voice Adept";
+      return "Адепт голоса";
     default:
-      return "Novice Hunter";
+      return "Начинающий охотник";
   }
 }
 
 export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
   {
-    title: "20 push-ups",
-    description: "Complete 20 controlled push-ups.",
+    title: "20 отжиманий",
+    description: "Выполни 20 техничных отжиманий.",
     category: "strength",
     difficulty: "easy",
     xpReward: XP_REWARDS.easy,
@@ -99,8 +99,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "30 squats",
-    description: "Complete 30 bodyweight squats.",
+    title: "30 приседаний",
+    description: "Выполни 30 приседаний с собственным весом.",
     category: "strength",
     difficulty: "easy",
     xpReward: XP_REWARDS.easy,
@@ -108,8 +108,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "15 minutes stretching",
-    description: "Spend 15 minutes on mobility or stretching.",
+    title: "15 минут растяжки",
+    description: "Потрать 15 минут на мобильность или растяжку.",
     category: "strength",
     difficulty: "easy",
     xpReward: XP_REWARDS.easy,
@@ -117,8 +117,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "30 minutes workout",
-    description: "Train for 30 minutes with steady effort.",
+    title: "30 минут тренировки",
+    description: "Тренируйся 30 минут в ровном темпе.",
     category: "strength",
     difficulty: "medium",
     xpReward: XP_REWARDS.medium,
@@ -126,8 +126,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Read 10 pages",
-    description: "Read 10 pages from a useful book.",
+    title: "Прочитать 10 страниц",
+    description: "Прочитай 10 страниц полезной книги.",
     category: "intelligence",
     difficulty: "easy",
     xpReward: XP_REWARDS.easy,
@@ -135,8 +135,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Study English for 30 minutes",
-    description: "Complete focused English study for 30 minutes.",
+    title: "30 минут английского",
+    description: "Позанимайся английским 30 минут без отвлечений.",
     category: "intelligence",
     difficulty: "medium",
     xpReward: XP_REWARDS.medium,
@@ -144,8 +144,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Watch educational video",
-    description: "Watch and summarize one educational video.",
+    title: "Посмотреть обучающее видео",
+    description: "Посмотри и кратко законспектируй одно обучающее видео.",
     category: "intelligence",
     difficulty: "easy",
     xpReward: XP_REWARDS.easy,
@@ -153,8 +153,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Complete one lesson",
-    description: "Finish one course lesson or tutorial module.",
+    title: "Пройти один урок",
+    description: "Заверши один урок курса или модуль туториала.",
     category: "intelligence",
     difficulty: "medium",
     xpReward: XP_REWARDS.medium,
@@ -162,8 +162,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Drink 2 liters of water",
-    description: "Reach your daily water target.",
+    title: "Выпить 2 литра воды",
+    description: "Закрой дневную норму воды.",
     category: "vitality",
     difficulty: "easy",
     xpReward: XP_REWARDS.easy,
@@ -171,8 +171,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Sleep before target time",
-    description: "Start your sleep routine before your target time.",
+    title: "Лечь спать вовремя",
+    description: "Начни подготовку ко сну до выбранного времени.",
     category: "vitality",
     difficulty: "medium",
     xpReward: XP_REWARDS.medium,
@@ -180,8 +180,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Walk 7000 steps",
-    description: "Walk at least 7000 steps today.",
+    title: "Пройти 7000 шагов",
+    description: "Пройди сегодня минимум 7000 шагов.",
     category: "vitality",
     difficulty: "medium",
     xpReward: XP_REWARDS.medium,
@@ -189,8 +189,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Prepare healthy meal",
-    description: "Prepare one meal that supports your energy.",
+    title: "Приготовить полезный прием пищи",
+    description: "Приготовь один прием пищи, который поддержит энергию.",
     category: "vitality",
     difficulty: "medium",
     xpReward: XP_REWARDS.medium,
@@ -198,8 +198,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Clean workspace",
-    description: "Reset your workspace before the next session.",
+    title: "Убрать рабочее место",
+    description: "Приведи рабочее место в порядок перед следующей сессией.",
     category: "discipline",
     difficulty: "easy",
     xpReward: XP_REWARDS.easy,
@@ -207,8 +207,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Plan tomorrow",
-    description: "Write the three most important tasks for tomorrow.",
+    title: "Спланировать завтра",
+    description: "Запиши три самые важные задачи на завтра.",
     category: "discipline",
     difficulty: "easy",
     xpReward: XP_REWARDS.easy,
@@ -216,8 +216,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Complete one delayed task",
-    description: "Finish one task you have postponed.",
+    title: "Закрыть одну отложенную задачу",
+    description: "Заверши одну задачу, которую откладывал.",
     category: "discipline",
     difficulty: "medium",
     xpReward: XP_REWARDS.medium,
@@ -225,8 +225,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Wake up on time",
-    description: "Wake up at your planned time.",
+    title: "Проснуться вовремя",
+    description: "Проснись в запланированное время.",
     category: "discipline",
     difficulty: "easy",
     xpReward: XP_REWARDS.easy,
@@ -234,8 +234,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "30 minutes deep work",
-    description: "Complete one uninterrupted deep work block.",
+    title: "30 минут глубокой работы",
+    description: "Проведи один непрерывный блок глубокой работы.",
     category: "focus",
     difficulty: "medium",
     xpReward: XP_REWARDS.medium,
@@ -243,8 +243,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "No social media for 1 hour",
-    description: "Stay away from social feeds for one full hour.",
+    title: "1 час без соцсетей",
+    description: "Не заходи в ленты соцсетей один полный час.",
     category: "focus",
     difficulty: "easy",
     xpReward: XP_REWARDS.easy,
@@ -252,8 +252,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Pomodoro session x2",
-    description: "Complete two Pomodoro focus sessions.",
+    title: "Две Pomodoro-сессии",
+    description: "Заверши две Pomodoro-сессии фокуса.",
     category: "focus",
     difficulty: "medium",
     xpReward: XP_REWARDS.medium,
@@ -261,8 +261,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Finish one important task",
-    description: "Finish one meaningful task before switching context.",
+    title: "Завершить одну важную задачу",
+    description: "Заверши одну значимую задачу перед переключением контекста.",
     category: "focus",
     difficulty: "hard",
     xpReward: XP_REWARDS.hard,
@@ -270,8 +270,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Message one useful contact",
-    description: "Send one thoughtful message to a useful contact.",
+    title: "Написать полезному контакту",
+    description: "Отправь одно осмысленное сообщение полезному контакту.",
     category: "charisma",
     difficulty: "easy",
     xpReward: XP_REWARDS.easy,
@@ -279,8 +279,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Practice speaking for 10 minutes",
-    description: "Practice speaking clearly for 10 minutes.",
+    title: "10 минут практики речи",
+    description: "Практикуй четкую речь 10 минут.",
     category: "charisma",
     difficulty: "easy",
     xpReward: XP_REWARDS.easy,
@@ -288,8 +288,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Record a short voice note",
-    description: "Record a short voice note and listen back once.",
+    title: "Записать короткое голосовое",
+    description: "Запиши короткое голосовое и один раз прослушай его.",
     category: "charisma",
     difficulty: "easy",
     xpReward: XP_REWARDS.easy,
@@ -297,8 +297,8 @@ export const DEFAULT_QUEST_TEMPLATES: QuestTemplate[] = [
     statRewardValue: 1
   },
   {
-    title: "Give someone a compliment",
-    description: "Give one sincere compliment today.",
+    title: "Сделать комплимент",
+    description: "Сделай сегодня один искренний комплимент.",
     category: "charisma",
     difficulty: "easy",
     xpReward: XP_REWARDS.easy,

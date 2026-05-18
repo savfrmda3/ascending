@@ -14,13 +14,13 @@ import {
 } from "lucide-react";
 import {
   STAT_KEYS,
-  STAT_LABELS,
   applyXp,
   xpToNextLevel,
   type BossProgressResult,
   type DashboardSummary,
   type Quest,
-  type QuestCompletionResult
+  type QuestCompletionResult,
+  type StatKey
 } from "@system-hunter/shared";
 import { Modal, Panel, PrimaryButton, ProgressBar, Metric } from "./components/ui.js";
 import { authenticateTelegram, completeQuest, generateQuest, getDashboard, progressBoss } from "./lib/api.js";
@@ -34,12 +34,161 @@ type AppModal =
   | null;
 
 const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }> = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "quests", label: "Quests", icon: ListChecks },
-  { id: "stats", label: "Stats", icon: BarChart3 },
-  { id: "boss", label: "Boss", icon: Swords },
-  { id: "profile", label: "Profile", icon: User }
+  { id: "dashboard", label: "Главная", icon: LayoutDashboard },
+  { id: "quests", label: "Квесты", icon: ListChecks },
+  { id: "stats", label: "Статы", icon: BarChart3 },
+  { id: "boss", label: "Босс", icon: Swords },
+  { id: "profile", label: "Профиль", icon: User }
 ];
+
+const STAT_LABELS_RU: Record<StatKey, { short: string; label: string }> = {
+  strength: { short: "STR", label: "Сила" },
+  intelligence: { short: "INT", label: "Интеллект" },
+  vitality: { short: "VIT", label: "Выносливость" },
+  discipline: { short: "DSC", label: "Дисциплина" },
+  focus: { short: "FOC", label: "Фокус" },
+  charisma: { short: "CHA", label: "Харизма" }
+};
+
+const CATEGORY_LABELS_RU: Record<Quest["category"], string> = {
+  strength: "Сила",
+  intelligence: "Интеллект",
+  vitality: "Здоровье",
+  discipline: "Дисциплина",
+  focus: "Фокус",
+  charisma: "Харизма"
+};
+
+const DIFFICULTY_LABELS_RU: Record<Quest["difficulty"], string> = {
+  easy: "Легкий",
+  medium: "Средний",
+  hard: "Сложный"
+};
+
+const STATUS_LABELS_RU: Record<Quest["status"], string> = {
+  active: "Активен",
+  completed: "Выполнен",
+  skipped: "Пропущен"
+};
+
+const CLASS_LABELS_RU: Record<string, string> = {
+  "Iron Vanguard": "Железный авангард",
+  "Mind Seeker": "Искатель разума",
+  "Vital Warden": "Страж жизненной силы",
+  "Oath Keeper": "Хранитель обета",
+  "Focus Hunter": "Охотник фокуса",
+  "Voice Adept": "Адепт голоса",
+  "Novice Hunter": "Начинающий охотник"
+};
+
+const QUEST_TEXT_RU: Record<string, string> = {
+  "20 push-ups": "20 отжиманий",
+  "Complete 20 controlled push-ups.": "Выполни 20 техничных отжиманий.",
+  "30 squats": "30 приседаний",
+  "Complete 30 bodyweight squats.": "Выполни 30 приседаний с собственным весом.",
+  "15 minutes stretching": "15 минут растяжки",
+  "Spend 15 minutes on mobility or stretching.": "Потрать 15 минут на мобильность или растяжку.",
+  "30 minutes workout": "30 минут тренировки",
+  "Train for 30 minutes with steady effort.": "Тренируйся 30 минут в ровном темпе.",
+  "Read 10 pages": "Прочитать 10 страниц",
+  "Read 10 pages from a useful book.": "Прочитай 10 страниц полезной книги.",
+  "Study English for 30 minutes": "30 минут английского",
+  "Complete focused English study for 30 minutes.": "Позанимайся английским 30 минут без отвлечений.",
+  "Watch educational video": "Посмотреть обучающее видео",
+  "Watch and summarize one educational video.": "Посмотри и кратко законспектируй одно обучающее видео.",
+  "Complete one lesson": "Пройти один урок",
+  "Finish one course lesson or tutorial module.": "Заверши один урок курса или модуль туториала.",
+  "Drink 2 liters of water": "Выпить 2 литра воды",
+  "Reach your daily water target.": "Закрой дневную норму воды.",
+  "Sleep before target time": "Лечь спать вовремя",
+  "Start your sleep routine before your target time.": "Начни подготовку ко сну до выбранного времени.",
+  "Walk 7000 steps": "Пройти 7000 шагов",
+  "Walk at least 7000 steps today.": "Пройди сегодня минимум 7000 шагов.",
+  "Prepare healthy meal": "Приготовить полезный прием пищи",
+  "Prepare one meal that supports your energy.": "Приготовь один прием пищи, который поддержит энергию.",
+  "Clean workspace": "Убрать рабочее место",
+  "Reset your workspace before the next session.": "Приведи рабочее место в порядок перед следующей сессией.",
+  "Plan tomorrow": "Спланировать завтра",
+  "Write the three most important tasks for tomorrow.": "Запиши три самые важные задачи на завтра.",
+  "Complete one delayed task": "Закрыть одну отложенную задачу",
+  "Finish one task you have postponed.": "Заверши одну задачу, которую откладывал.",
+  "Wake up on time": "Проснуться вовремя",
+  "Wake up at your planned time.": "Проснись в запланированное время.",
+  "30 minutes deep work": "30 минут глубокой работы",
+  "Complete one uninterrupted deep work block.": "Проведи один непрерывный блок глубокой работы.",
+  "No social media for 1 hour": "1 час без соцсетей",
+  "Stay away from social feeds for one full hour.": "Не заходи в ленты соцсетей один полный час.",
+  "Pomodoro session x2": "Две Pomodoro-сессии",
+  "Complete two Pomodoro focus sessions.": "Заверши две Pomodoro-сессии фокуса.",
+  "Finish one important task": "Завершить одну важную задачу",
+  "Finish one meaningful task before switching context.": "Заверши одну значимую задачу перед переключением контекста.",
+  "Message one useful contact": "Написать полезному контакту",
+  "Send one thoughtful message to a useful contact.": "Отправь одно осмысленное сообщение полезному контакту.",
+  "Practice speaking for 10 minutes": "10 минут практики речи",
+  "Practice speaking clearly for 10 minutes.": "Практикуй четкую речь 10 минут.",
+  "Record a short voice note": "Записать короткое голосовое",
+  "Record a short voice note and listen back once.": "Запиши короткое голосовое и один раз прослушай его.",
+  "Give someone a compliment": "Сделать комплимент",
+  "Give one sincere compliment today.": "Сделай сегодня один искренний комплимент."
+};
+
+const BOSS_TEXT_RU: Record<string, string> = {
+  "Devourer of Focus": "Пожиратель фокуса",
+  "A pressure-born entity that weakens when you protect deep work blocks.":
+    "Сущность давления, которая слабеет, когда ты защищаешь блоки глубокой работы.",
+  "Complete 4 deep work sessions.": "Заверши 4 сессии глубокой работы."
+};
+
+const ACHIEVEMENT_TEXT_RU: Record<string, { title: string; description: string }> = {
+  first_quest: { title: "Первый квест", description: "Выполни первый ежедневный квест." },
+  streak_3: { title: "Серия 3 дня", description: "Выполняй квесты три дня подряд." },
+  streak_7: { title: "Серия 7 дней", description: "Выполняй квесты семь дней подряд." },
+  first_level_up: { title: "Первое повышение", description: "Получи новый уровень впервые." },
+  boss_slayer: { title: "Победитель босса", description: "Победи первого недельного босса." },
+  focus_hunter: { title: "Охотник фокуса", description: "Выполни 10 квестов фокуса." },
+  discipline_initiate: { title: "Адепт дисциплины", description: "Выполни 10 квестов дисциплины." }
+};
+
+const TITLE_LABELS_RU: Record<string, string> = {
+  "Focus Hunter": "Охотник фокуса"
+};
+
+function translateKnownText(text: string | null | undefined, dictionary: Record<string, string>) {
+  if (!text) return "";
+  return dictionary[text] ?? text;
+}
+
+function displayClassName(className: string) {
+  return CLASS_LABELS_RU[className] ?? className;
+}
+
+function displayTitle(title: string | null | undefined) {
+  if (!title) return "Нет";
+  return TITLE_LABELS_RU[title] ?? title;
+}
+
+function displayQuestTitle(quest: Pick<Quest, "title">) {
+  return translateKnownText(quest.title, QUEST_TEXT_RU);
+}
+
+function displayQuestDescription(quest: Pick<Quest, "description">) {
+  return translateKnownText(quest.description, QUEST_TEXT_RU);
+}
+
+function displayBossText(text: string) {
+  return translateKnownText(text, BOSS_TEXT_RU);
+}
+
+function displayAchievement(achievement: DashboardSummary["achievements"][number]) {
+  return ACHIEVEMENT_TEXT_RU[achievement.key] ?? {
+    title: achievement.title,
+    description: achievement.description
+  };
+}
+
+function formatRuDate(value: string) {
+  return new Date(value).toLocaleDateString("ru-RU");
+}
 
 export function App() {
   const [view, setView] = useState<View>("dashboard");
@@ -61,13 +210,13 @@ export function App() {
             return;
           }
 
-          throw new Error("Telegram auth data is missing. Open System Hunter from the bot.");
+          throw new Error("Нет данных авторизации Telegram. Открой System Hunter из бота.");
         }
 
         await authenticateTelegram(initData);
         setDashboard(await getDashboard());
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Unable to start System Hunter");
+        setError(caught instanceof Error ? caught.message : "Не удалось запустить System Hunter");
       } finally {
         setLoading(false);
       }
@@ -100,7 +249,7 @@ export function App() {
       window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred("success");
       await refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Quest completion failed");
+      setError(caught instanceof Error ? caught.message : "Не удалось завершить квест");
     } finally {
       setBusyId(null);
     }
@@ -119,8 +268,8 @@ export function App() {
                   {
                     ...(current.todayQuests[1] ?? current.todayQuests[0] ?? demoDashboard.todayQuests[0])!,
                     id: `demo-${Date.now()}`,
-                    title: "Finish one important task",
-                    description: "Finish one meaningful task before switching context.",
+                    title: "Завершить одну важную задачу",
+                    description: "Заверши одну значимую задачу перед переключением контекста.",
                     difficulty: "hard",
                     xpReward: 75,
                     status: "active",
@@ -130,15 +279,15 @@ export function App() {
               }
             : current
         );
-        setModal({ type: "notice", title: "QUEST GENERATED", body: "A new task has entered your daily log." });
+        setModal({ type: "notice", title: "КВЕСТ СОЗДАН", body: "Новый квест добавлен в дневной протокол." });
         return;
       }
 
       await generateQuest();
       await refresh();
-      setModal({ type: "notice", title: "QUEST GENERATED", body: "A new task has entered your daily log." });
+      setModal({ type: "notice", title: "КВЕСТ СОЗДАН", body: "Новый квест добавлен в дневной протокол." });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Quest generation failed");
+      setError(caught instanceof Error ? caught.message : "Не удалось создать квест");
     } finally {
       setBusyId(null);
     }
@@ -150,16 +299,16 @@ export function App() {
     try {
       if (demoMode) {
         const result = progressBossInDemo();
-        if (result) setModal(result.victory ? { type: "boss", result } : { type: "notice", title: "BOSS PROGRESS", body: "Progress has been recorded." });
+        if (result) setModal(result.victory ? { type: "boss", result } : { type: "notice", title: "ПРОГРЕСС БОССА", body: "Шаг босса засчитан." });
         return;
       }
 
       const result = await progressBoss(dashboard.boss.id);
-      setModal(result.victory ? { type: "boss", result } : { type: "notice", title: "BOSS PROGRESS", body: "Progress has been recorded." });
+      setModal(result.victory ? { type: "boss", result } : { type: "notice", title: "ПРОГРЕСС БОССА", body: "Шаг босса засчитан." });
       window.Telegram?.WebApp?.HapticFeedback?.impactOccurred("medium");
       await refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Boss progress failed");
+      setError(caught instanceof Error ? caught.message : "Не удалось обновить прогресс босса");
     } finally {
       setBusyId(null);
     }
@@ -237,11 +386,11 @@ export function App() {
   }
 
   if (loading) {
-    return <BootScreen label="SYSTEM BOOTING" />;
+    return <BootScreen label="СИСТЕМА ЗАГРУЖАЕТСЯ" />;
   }
 
   if (!dashboard) {
-    return <BootScreen label="SYSTEM LOCKED" message={error ?? "Unable to load profile"} />;
+    return <BootScreen label="СИСТЕМА ЗАБЛОКИРОВАНА" message={error ?? "Не удалось загрузить профиль"} />;
   }
 
   return (
@@ -250,7 +399,7 @@ export function App() {
       <main className="relative mx-auto flex min-h-screen w-full max-w-md flex-col overflow-x-hidden px-4 pb-24 pt-4">
         <header className="mb-4 flex items-center justify-between">
           <div className="min-w-0">
-            <p className="font-mono text-xs font-bold uppercase tracking-normal text-system-cyan">SYSTEM ONLINE</p>
+            <p className="font-mono text-xs font-bold uppercase tracking-normal text-system-cyan">СИСТЕМА АКТИВНА</p>
             <h1 className="mt-1 text-2xl font-black">System Hunter</h1>
           </div>
           <div className="grid size-11 place-items-center rounded-lg border border-system-cyan/40 bg-system-cyan/10 text-system-cyan shadow-cyan">
@@ -350,12 +499,12 @@ function DashboardView({
       <Panel glow>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm text-system-muted">Hunter: @{profile.username ?? "unknown"}</p>
-            <p className="mt-2 text-4xl font-black leading-none">Level {profile.level}</p>
-            <p className="mt-2 break-words font-mono text-sm text-system-cyan">Rank {profile.rank} / {profile.className}</p>
+            <p className="text-sm text-system-muted">Охотник: @{profile.username ?? "неизвестно"}</p>
+            <p className="mt-2 text-4xl font-black leading-none">Уровень {profile.level}</p>
+            <p className="mt-2 break-words font-mono text-sm text-system-cyan">Ранг {profile.rank} / {displayClassName(profile.className)}</p>
           </div>
           <div className="rounded-lg border border-system-purple/50 bg-system-purple/15 px-3 py-2 text-center">
-            <p className="text-[11px] uppercase text-system-muted">Streak</p>
+            <p className="text-[11px] uppercase text-system-muted">Серия</p>
             <p className="font-mono text-xl font-black text-system-warning">{profile.streak}</p>
           </div>
         </div>
@@ -380,7 +529,7 @@ function DashboardView({
         <Panel>
           <div className="mb-3 flex items-center gap-2 text-system-warning">
             <Battery size={17} />
-            <span className="text-xs font-bold uppercase">Energy</span>
+            <span className="text-xs font-bold uppercase">Энергия</span>
           </div>
           <ProgressBar value={profile.energy} max={100} color="warning" />
           <p className="mt-2 font-mono text-sm">{profile.energy} / 100</p>
@@ -388,26 +537,26 @@ function DashboardView({
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Metric label="Today" value={`${completedToday} / ${dashboard.todayQuests.length} quests`} />
-        <Metric label="Weekly Boss" value={boss ? `${boss.progress} / ${boss.target}` : "No signal"} accent="text-system-warning" />
+        <Metric label="Сегодня" value={`${completedToday} / ${dashboard.todayQuests.length} квестов`} />
+        <Metric label="Босс недели" value={boss ? `${boss.progress} / ${boss.target}` : "Нет сигнала"} accent="text-system-warning" />
       </div>
 
       <Panel className="border-system-cyan/40 bg-system-cyan/8">
         <div className="flex items-start gap-3">
           <Zap className="mt-0.5 text-system-cyan" size={18} />
           <div>
-            <p className="font-mono text-sm font-bold text-system-text">SYSTEM NOTIFICATION</p>
+            <p className="font-mono text-sm font-bold text-system-text">СИСТЕМНОЕ УВЕДОМЛЕНИЕ</p>
             <p className="mt-1 text-sm text-system-muted">
-              {demoMode ? "Dev preview is active. Telegram auth will be required in production." : "Daily protocol is synchronized."}
+              {demoMode ? "Активен режим предпросмотра. В продакшене потребуется авторизация Telegram." : "Дневной протокол синхронизирован."}
             </p>
           </div>
         </div>
       </Panel>
 
       <div className="grid grid-cols-3 gap-2">
-        <PrimaryButton onClick={() => onView("quests")}>Go to Quests</PrimaryButton>
-        <PrimaryButton onClick={() => onView("stats")} variant="ghost">View Stats</PrimaryButton>
-        <PrimaryButton onClick={() => onView("boss")} variant="ghost">Fight Boss</PrimaryButton>
+        <PrimaryButton onClick={() => onView("quests")}>К квестам</PrimaryButton>
+        <PrimaryButton onClick={() => onView("stats")} variant="ghost">Статы</PrimaryButton>
+        <PrimaryButton onClick={() => onView("boss")} variant="ghost">Бой с боссом</PrimaryButton>
       </div>
     </div>
   );
@@ -426,34 +575,34 @@ function QuestsView({
 }) {
   return (
     <div className="space-y-3">
-      <ScreenTitle title="Daily Quests" icon={<ListChecks size={20} />} />
+      <ScreenTitle title="Ежедневные квесты" icon={<ListChecks size={20} />} />
       {quests.map((quest) => (
         <Panel key={quest.id} className={quest.status === "completed" ? "border-system-success/45" : ""}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-base font-black">{quest.title}</h2>
-              <p className="mt-1 text-sm text-system-muted">{quest.description}</p>
+              <h2 className="text-base font-black">{displayQuestTitle(quest)}</h2>
+              <p className="mt-1 text-sm text-system-muted">{displayQuestDescription(quest)}</p>
             </div>
             <StatusPill status={quest.status} />
           </div>
           <div className="mt-4 grid grid-cols-3 gap-2">
-            <Metric label="Difficulty" value={quest.difficulty} accent={difficultyColor(quest.difficulty)} />
-            <Metric label="Category" value={quest.category} />
-            <Metric label="Reward" value={`+${quest.xpReward} XP`} accent="text-system-warning" />
+            <Metric label="Сложность" value={DIFFICULTY_LABELS_RU[quest.difficulty]} accent={difficultyColor(quest.difficulty)} />
+            <Metric label="Категория" value={CATEGORY_LABELS_RU[quest.category]} />
+            <Metric label="Награда" value={`+${quest.xpReward} XP`} accent="text-system-warning" />
           </div>
           <div className="mt-4 flex items-center justify-between gap-3">
-            <p className="font-mono text-xs text-system-muted">+{quest.statRewardValue} {STAT_LABELS[quest.statRewardKey].short}</p>
+            <p className="font-mono text-xs text-system-muted">+{quest.statRewardValue} {STAT_LABELS_RU[quest.statRewardKey].short}</p>
             <PrimaryButton
               disabled={quest.status !== "active" || busyId === quest.id}
               onClick={() => onCompleteQuest(quest)}
             >
-              {quest.status === "completed" ? "Completed" : "Complete"}
+              {quest.status === "completed" ? "Выполнено" : "Выполнить"}
             </PrimaryButton>
           </div>
         </Panel>
       ))}
       <PrimaryButton disabled={busyId === "generate"} onClick={onGenerateQuest} variant="ghost">
-        Generate Quest
+        Создать квест
       </PrimaryButton>
     </div>
   );
@@ -464,23 +613,23 @@ function StatsView({ dashboard }: { dashboard: DashboardSummary }) {
 
   return (
     <div className="space-y-4">
-      <ScreenTitle title="Stats" icon={<Gauge size={20} />} />
+      <ScreenTitle title="Характеристики" icon={<Gauge size={20} />} />
       <Panel glow>
         <div className="grid grid-cols-2 gap-3">
-          <Metric label="Level" value={`${dashboard.profile.level}`} />
-          <Metric label="Rank" value={dashboard.profile.rank} accent="text-system-warning" />
-          <Metric label="Class" value={dashboard.profile.className} />
-          <Metric label="Total XP" value={`${dashboard.profile.totalXp}`} accent="text-system-cyan" />
-          <Metric label="Streak" value={`${dashboard.profile.streak} days`} accent="text-system-warning" />
-          <Metric label="Completed" value={`${dashboard.profile.completedQuestsCount}`} accent="text-system-success" />
+          <Metric label="Уровень" value={`${dashboard.profile.level}`} />
+          <Metric label="Ранг" value={dashboard.profile.rank} accent="text-system-warning" />
+          <Metric label="Класс" value={displayClassName(dashboard.profile.className)} />
+          <Metric label="Всего XP" value={`${dashboard.profile.totalXp}`} accent="text-system-cyan" />
+          <Metric label="Серия" value={`${dashboard.profile.streak} дн.`} accent="text-system-warning" />
+          <Metric label="Выполнено" value={`${dashboard.profile.completedQuestsCount}`} accent="text-system-success" />
         </div>
       </Panel>
       {STAT_KEYS.map((key) => (
         <Panel key={key}>
           <div className="mb-2 flex items-center justify-between">
             <div>
-              <p className="font-mono text-xs font-bold text-system-cyan">{STAT_LABELS[key].short}</p>
-              <h2 className="font-bold">{STAT_LABELS[key].label}</h2>
+              <p className="font-mono text-xs font-bold text-system-cyan">{STAT_LABELS_RU[key].short}</p>
+              <h2 className="font-bold">{STAT_LABELS_RU[key].label}</h2>
             </div>
             <p className="font-mono text-lg font-black">{dashboard.stats[key]}</p>
           </div>
@@ -507,22 +656,22 @@ function BossView({
   if (!boss) {
     return (
       <div className="space-y-4">
-        <ScreenTitle title="Weekly Boss" icon={<Swords size={20} />} />
-        <Panel>No active boss quest.</Panel>
+        <ScreenTitle title="Босс недели" icon={<Swords size={20} />} />
+        <Panel>Активный босс-квест не найден.</Panel>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <ScreenTitle title="Weekly Boss" icon={<Swords size={20} />} />
+      <ScreenTitle title="Босс недели" icon={<Swords size={20} />} />
       <section className="boss-card rounded-lg border border-system-purple/50 p-5 shadow-glow">
-        <p className="font-mono text-xs font-bold uppercase text-system-cyan">Boss</p>
-        <h2 className="mt-2 text-3xl font-black leading-tight">{boss.name}</h2>
-        <p className="mt-3 text-sm text-system-muted">{boss.description}</p>
+        <p className="font-mono text-xs font-bold uppercase text-system-cyan">Босс</p>
+        <h2 className="mt-2 text-3xl font-black leading-tight">{displayBossText(boss.name)}</h2>
+        <p className="mt-3 text-sm text-system-muted">{displayBossText(boss.description)}</p>
         <div className="mt-5">
           <div className="mb-2 flex justify-between font-mono text-xs text-system-muted">
-            <span>Progress</span>
+            <span>Прогресс</span>
             <span>{boss.progress} / {boss.target}</span>
           </div>
           <ProgressBar value={boss.progress} max={boss.target} color="danger" />
@@ -530,24 +679,24 @@ function BossView({
       </section>
 
       <Panel>
-        <p className="font-mono text-xs font-bold uppercase text-system-muted">Objective</p>
-        <p className="mt-2 text-lg font-bold">{boss.objective}</p>
+        <p className="font-mono text-xs font-bold uppercase text-system-muted">Цель</p>
+        <p className="mt-2 text-lg font-bold">{displayBossText(boss.objective)}</p>
       </Panel>
 
       <Panel>
-        <p className="font-mono text-xs font-bold uppercase text-system-muted">Reward</p>
+        <p className="font-mono text-xs font-bold uppercase text-system-muted">Награда</p>
         <div className="mt-3 grid grid-cols-3 gap-2">
           <Metric label="XP" value={`+${boss.xpReward}`} accent="text-system-warning" />
-          <Metric label={STAT_LABELS[boss.statRewardKey].short} value={`+${boss.statRewardValue}`} />
-          <Metric label="Title" value="Focus Hunter" accent="text-system-success" />
+          <Metric label={STAT_LABELS_RU[boss.statRewardKey].short} value={`+${boss.statRewardValue}`} />
+          <Metric label="Титул" value={displayTitle("Focus Hunter")} accent="text-system-success" />
         </div>
       </Panel>
 
       <div className="grid grid-cols-2 gap-2">
         <PrimaryButton disabled={boss.status !== "active" || busyId === boss.id} onClick={onBossStep}>
-          Complete Step
+          Засчитать шаг
         </PrimaryButton>
-        <PrimaryButton onClick={() => onView("dashboard")} variant="ghost">Back</PrimaryButton>
+        <PrimaryButton onClick={() => onView("dashboard")} variant="ghost">Назад</PrimaryButton>
       </div>
     </div>
   );
@@ -556,47 +705,50 @@ function BossView({
 function ProfileView({ dashboard }: { dashboard: DashboardSummary }) {
   return (
     <div className="space-y-4">
-      <ScreenTitle title="Profile" icon={<User size={20} />} />
+      <ScreenTitle title="Профиль" icon={<User size={20} />} />
       <Panel glow>
         <div className="flex items-center gap-4">
           <div className="grid size-16 place-items-center rounded-lg border border-system-cyan/40 bg-system-cyan/10 text-2xl font-black text-system-cyan">
             {dashboard.profile.username?.slice(0, 1).toUpperCase() ?? "H"}
           </div>
           <div>
-            <h2 className="text-xl font-black">@{dashboard.profile.username ?? "unknown"}</h2>
-            <p className="mt-1 text-sm text-system-muted">Created {new Date(dashboard.profile.createdAt).toLocaleDateString()}</p>
+            <h2 className="text-xl font-black">@{dashboard.profile.username ?? "неизвестно"}</h2>
+            <p className="mt-1 text-sm text-system-muted">Создан {formatRuDate(dashboard.profile.createdAt)}</p>
           </div>
         </div>
         <div className="mt-5 grid grid-cols-2 gap-3">
-          <Metric label="Level" value={`${dashboard.profile.level}`} />
-          <Metric label="Rank" value={dashboard.profile.rank} accent="text-system-warning" />
-          <Metric label="Class" value={dashboard.profile.className} />
-          <Metric label="Title" value={dashboard.profile.currentTitle ?? "None"} accent="text-system-success" />
-          <Metric label="Streak" value={`${dashboard.profile.streak} days`} />
-          <Metric label="Quests" value={`${dashboard.profile.completedQuestsCount}`} />
+          <Metric label="Уровень" value={`${dashboard.profile.level}`} />
+          <Metric label="Ранг" value={dashboard.profile.rank} accent="text-system-warning" />
+          <Metric label="Класс" value={displayClassName(dashboard.profile.className)} />
+          <Metric label="Титул" value={displayTitle(dashboard.profile.currentTitle)} accent="text-system-success" />
+          <Metric label="Серия" value={`${dashboard.profile.streak} дн.`} />
+          <Metric label="Квесты" value={`${dashboard.profile.completedQuestsCount}`} />
         </div>
       </Panel>
 
-      <ScreenTitle title="Achievements" icon={<Trophy size={20} />} compact />
+      <ScreenTitle title="Достижения" icon={<Trophy size={20} />} compact />
       <div className="space-y-3">
         {dashboard.achievements.length === 0 ? (
           <Panel>
-            <p className="text-sm text-system-muted">No achievements unlocked yet.</p>
+            <p className="text-sm text-system-muted">Достижения пока не открыты.</p>
           </Panel>
         ) : (
-          dashboard.achievements.map((achievement) => (
-            <Panel key={achievement.id} className="border-system-warning/40">
-              <div className="flex items-start gap-3">
-                <div className="grid size-10 place-items-center rounded-md border border-system-warning/40 bg-system-warning/10 text-system-warning">
-                  <Trophy size={18} />
+          dashboard.achievements.map((achievement) => {
+            const translated = displayAchievement(achievement);
+            return (
+              <Panel key={achievement.id} className="border-system-warning/40">
+                <div className="flex items-start gap-3">
+                  <div className="grid size-10 place-items-center rounded-md border border-system-warning/40 bg-system-warning/10 text-system-warning">
+                    <Trophy size={18} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold">{translated.title}</h3>
+                    <p className="mt-1 text-sm text-system-muted">{translated.description}</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-bold">{achievement.title}</h3>
-                  <p className="mt-1 text-sm text-system-muted">{achievement.description}</p>
-                </div>
-              </div>
-            </Panel>
-          ))
+              </Panel>
+            );
+          })
         )}
       </div>
     </div>
@@ -606,20 +758,20 @@ function ProfileView({ dashboard }: { dashboard: DashboardSummary }) {
 function ResultModal({ modal, onClose }: { modal: NonNullable<AppModal>; onClose: () => void }) {
   if (modal.type === "quest") {
     return (
-      <Modal title={modal.result.levelUp.leveledUp ? "Level Up" : "Quest Completed"} onClose={onClose}>
+      <Modal title={modal.result.levelUp.leveledUp ? "Уровень повышен" : "Квест выполнен"} onClose={onClose}>
         <div className="space-y-3">
-          <p className="text-system-text">{modal.result.quest.title}</p>
+          <p className="text-system-text">{displayQuestTitle(modal.result.quest)}</p>
           <div className="grid grid-cols-2 gap-2">
             <Metric label="XP" value={`+${modal.result.rewards.xp}`} accent="text-system-warning" />
             <Metric
-              label={STAT_LABELS[modal.result.rewards.statKey].short}
+              label={STAT_LABELS_RU[modal.result.rewards.statKey].short}
               value={`+${modal.result.rewards.statValue}`}
               accent="text-system-cyan"
             />
           </div>
           {modal.result.levelUp.leveledUp ? (
             <p className="rounded-md border border-system-cyan/40 bg-system-cyan/10 p-3 font-mono text-system-cyan">
-              Level {modal.result.levelUp.from} -&gt; {modal.result.levelUp.to}
+              Уровень {modal.result.levelUp.from} -&gt; {modal.result.levelUp.to}
             </p>
           ) : null}
         </div>
@@ -629,12 +781,12 @@ function ResultModal({ modal, onClose }: { modal: NonNullable<AppModal>; onClose
 
   if (modal.type === "boss") {
     return (
-      <Modal title="Boss Defeated" onClose={onClose}>
+      <Modal title="Босс повержен" onClose={onClose}>
         <div className="space-y-3">
-          <p className="text-system-text">{modal.result.boss.name}</p>
-          <Metric label="Reward" value={`+${modal.result.boss.xpReward} XP`} accent="text-system-warning" />
+          <p className="text-system-text">{displayBossText(modal.result.boss.name)}</p>
+          <Metric label="Награда" value={`+${modal.result.boss.xpReward} XP`} accent="text-system-warning" />
           <p className="rounded-md border border-system-success/40 bg-system-success/10 p-3 font-mono text-system-success">
-            Title unlocked: Focus Hunter
+            Титул открыт: {displayTitle("Focus Hunter")}
           </p>
         </div>
       </Modal>
@@ -669,7 +821,7 @@ function StatusPill({ status }: { status: Quest["status"] }) {
 
   return (
     <span className={`shrink-0 rounded-md border px-2 py-1 font-mono text-[11px] font-bold uppercase ${className}`}>
-      {status}
+      {STATUS_LABELS_RU[status]}
     </span>
   );
 }
