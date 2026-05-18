@@ -40,7 +40,8 @@ NODE_ENV=production
 https://ascending.vercel.app
 ```
 
-`BACKEND_URL` is not required for the Vercel setup because the Mini App calls same-origin endpoints like `/api/me`.
+`BACKEND_URL` is not required for the Vercel setup and is ignored by the Mini App build because the app calls same-origin endpoints like `/api/me`.
+Only set `VITE_BACKEND_URL` if you intentionally want the browser to call a separate API domain.
 
 ## Telegram Setup
 
