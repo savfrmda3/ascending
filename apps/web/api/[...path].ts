@@ -118,6 +118,10 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
 }
 
 function getPathSegments(req: ApiRequest) {
+  const rawRoute = req.query?.route;
+  if (Array.isArray(rawRoute)) return rawRoute.flatMap(splitSegment).filter(Boolean);
+  if (typeof rawRoute === "string") return splitSegment(rawRoute).filter(Boolean);
+
   const rawPath = req.query?.path;
   if (Array.isArray(rawPath)) return rawPath.flatMap(splitSegment).filter(Boolean);
   if (typeof rawPath === "string") return splitSegment(rawPath).filter(Boolean);
