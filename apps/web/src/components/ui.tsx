@@ -12,7 +12,7 @@ export function Panel({
 }) {
   return (
     <section
-      className={`min-w-0 rounded-lg border border-system-border bg-system-card/88 p-4 ${glow ? "shadow-glow" : ""} ${className}`}
+      className={`hud-panel min-w-0 border border-system-border bg-system-card/88 p-4 ${glow ? "hud-panel-glow" : ""} ${className}`}
     >
       {children}
     </section>
@@ -41,9 +41,9 @@ export function ProgressBar({
             : "from-system-purple to-system-cyan";
 
   return (
-    <div className="h-2.5 overflow-hidden rounded bg-black/40 ring-1 ring-white/5">
+    <div className="hud-progress-track h-2.5 overflow-hidden bg-black/40 ring-1 ring-white/5">
       <div
-        className={`h-full rounded bg-gradient-to-r ${colorClass} shadow-cyan transition-all duration-500`}
+        className={`h-full bg-gradient-to-r ${colorClass} shadow-cyan transition-all duration-500`}
         style={{ width: `${width}%` }}
       />
     </div>
@@ -60,7 +60,7 @@ export function Metric({
   accent?: string;
 }) {
   return (
-    <div className="rounded-md border border-system-border bg-black/18 px-3 py-2">
+    <div className="hud-metric border border-system-border bg-black/18 px-3 py-2">
       <p className="text-[11px] uppercase tracking-normal text-system-muted">{label}</p>
       <p className={`mt-1 break-words text-xs font-semibold sm:text-sm ${accent}`}>{value}</p>
     </div>
@@ -89,7 +89,7 @@ export function PrimaryButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`min-h-11 min-w-0 rounded-lg border px-3 py-2 text-center text-xs font-semibold leading-tight transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 sm:text-sm ${className}`}
+      className={`hud-button min-h-11 min-w-0 border px-3 py-2 text-center text-xs font-semibold leading-tight transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 sm:text-sm ${className}`}
       type="button"
     >
       {children}
@@ -108,11 +108,11 @@ export function Modal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-      <div className="level-up w-full max-w-sm rounded-lg border border-system-cyan/50 bg-system-card p-5 shadow-cyan">
+      <div className="hud-panel level-up w-full max-w-sm border border-system-cyan/50 bg-system-card p-5 shadow-cyan">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-mono text-lg font-black uppercase text-system-text">{title}</h2>
           <button
-            className="grid size-9 place-items-center rounded-md border border-system-border bg-white/5 text-system-muted"
+            className="hud-button grid size-9 place-items-center border border-system-border bg-white/5 text-system-muted"
             onClick={onClose}
             type="button"
             aria-label="Закрыть окно"

@@ -2,9 +2,15 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   BarChart3,
   Battery,
+  Brain,
+  Crosshair,
+  Dumbbell,
+  Flame,
   Gauge,
+  HeartPulse,
   LayoutDashboard,
   ListChecks,
+  MessageCircle,
   Shield,
   Sparkles,
   Swords,
@@ -39,6 +45,15 @@ const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }>
   { id: "stats", label: "Статы", icon: BarChart3 },
   { id: "boss", label: "Босс", icon: Swords },
   { id: "profile", label: "Профиль", icon: User }
+];
+
+const statusStats: Array<{ key: StatKey; icon: typeof LayoutDashboard }> = [
+  { key: "strength", icon: Dumbbell },
+  { key: "vitality", icon: HeartPulse },
+  { key: "discipline", icon: Flame },
+  { key: "intelligence", icon: Brain },
+  { key: "focus", icon: Crosshair },
+  { key: "charisma", icon: MessageCircle }
 ];
 
 const STAT_LABELS_RU: Record<StatKey, { short: string; label: string }> = {
@@ -394,16 +409,17 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen bg-system-bg text-system-text">
-      <div className="system-grid fixed inset-0 opacity-70" />
-      <main className="relative mx-auto flex min-h-screen w-full max-w-md flex-col overflow-x-hidden px-4 pb-24 pt-4">
-        <header className="mb-4 flex items-center justify-between">
+    <div className="app-frame min-h-screen bg-system-bg text-system-text">
+      <div className="system-backdrop fixed inset-0" />
+      <div className="system-grid fixed inset-0 opacity-90" />
+      <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-[414px] flex-col overflow-x-hidden px-3 pb-24 pt-3.5">
+        <header className="system-topbar mb-4 flex items-center justify-between px-3 py-2.5">
           <div className="min-w-0">
-            <p className="font-mono text-xs font-bold uppercase tracking-normal text-system-cyan">СИСТЕМА АКТИВНА</p>
-            <h1 className="mt-1 text-2xl font-black">System Hunter</h1>
+            <p className="font-mono text-[10px] font-bold uppercase tracking-normal text-system-cyan">СИСТЕМА АКТИВНА</p>
+            <h1 className="mt-0.5 font-mono text-xl font-black uppercase text-slate-50">System Hunter</h1>
           </div>
-          <div className="grid size-11 place-items-center rounded-lg border border-system-cyan/40 bg-system-cyan/10 text-system-cyan shadow-cyan">
-            <Sparkles size={20} />
+          <div className="grid size-10 place-items-center border border-system-cyan/40 bg-system-cyan/10 text-system-cyan shadow-cyan">
+            <Sparkles size={18} />
           </div>
         </header>
 
@@ -438,17 +454,17 @@ export function App() {
         {view === "profile" ? <ProfileView dashboard={dashboard} /> : null}
       </main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-system-border bg-system-bg/92 px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl">
-        <div className="mx-auto grid max-w-md grid-cols-5 gap-1">
+      <nav className="nav-hud fixed inset-x-0 bottom-0 z-40 border-t px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl">
+        <div className="mx-auto grid max-w-[414px] grid-cols-5 gap-1">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = view === item.id;
             return (
               <button
                 key={item.id}
-                className={`flex min-h-14 flex-col items-center justify-center rounded-lg text-[11px] font-semibold transition ${
+                className={`nav-hud-button flex min-h-14 flex-col items-center justify-center text-[10px] font-semibold transition ${
                   active
-                    ? "border border-system-purple/50 bg-system-purple/18 text-system-cyan shadow-cyan"
+                    ? "nav-hud-button-active text-system-cyan"
                     : "text-system-muted"
                 }`}
                 onClick={() => setView(item.id)}
@@ -470,8 +486,12 @@ export function App() {
 function BootScreen({ label, message }: { label: string; message?: string }) {
   return (
     <div className="grid min-h-screen place-items-center bg-system-bg px-6 text-center text-system-text">
-      <div className="w-full max-w-sm rounded-lg border border-system-border bg-system-card p-6 shadow-glow">
-        <p className="font-mono text-sm font-bold uppercase text-system-cyan">{label}</p>
+      <div className="system-backdrop fixed inset-0" />
+      <div className="system-grid fixed inset-0 opacity-90" />
+      <div className="hud-panel hud-panel-glow relative w-full max-w-sm border border-system-border bg-system-card p-6">
+        <div className="hud-title-frame mb-5">
+          <p className="font-mono text-sm font-bold uppercase text-system-cyan">{label}</p>
+        </div>
         <div className="mx-auto mt-5 h-2 w-44 overflow-hidden rounded bg-black/50">
           <div className="h-full w-2/3 animate-pulse rounded bg-gradient-to-r from-system-purple to-system-cyan" />
         </div>
@@ -493,53 +513,76 @@ function DashboardView({
   demoMode: boolean;
 }) {
   const { profile, boss } = dashboard;
+  const fatigue = Math.max(0, 100 - profile.energy);
+  const bossProgress = boss ? `${boss.progress}/${boss.target}` : "--";
 
   return (
     <div className="space-y-4">
-      <Panel glow>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-sm text-system-muted">Охотник: @{profile.username ?? "неизвестно"}</p>
-            <p className="mt-2 text-4xl font-black leading-none">Уровень {profile.level}</p>
-            <p className="mt-2 break-words font-mono text-sm text-system-cyan">Ранг {profile.rank} / {displayClassName(profile.className)}</p>
+      <section className="status-terminal">
+        <div className="hud-title-frame">
+          <p className="font-mono text-lg font-black uppercase tracking-normal">СТАТУС</p>
+        </div>
+
+        <div className="status-identity grid grid-cols-[0.9fr_1.1fr] items-center gap-4 px-1">
+          <div className="text-center">
+            <p className="status-level-number">{profile.level}</p>
+            <p className="status-label mt-1">УРОВЕНЬ</p>
           </div>
-          <div className="rounded-lg border border-system-purple/50 bg-system-purple/15 px-3 py-2 text-center">
-            <p className="text-[11px] uppercase text-system-muted">Серия</p>
-            <p className="font-mono text-xl font-black text-system-warning">{profile.streak}</p>
+          <div className="space-y-1.5 text-sm">
+            <div className="status-meta-line">
+              <span className="status-label">ОХОТНИК</span>
+              <span className="truncate text-slate-100">@{profile.username ?? "unknown"}</span>
+            </div>
+            <div className="status-meta-line">
+              <span className="status-label">РАНГ</span>
+              <span className="font-mono font-bold text-system-warning">{profile.rank}</span>
+            </div>
+            <div className="status-meta-line">
+              <span className="status-label">ТИТУЛ</span>
+              <span className="break-words font-semibold text-slate-100">{displayTitle(profile.currentTitle) === "Нет" ? displayClassName(profile.className) : displayTitle(profile.currentTitle)}</span>
+            </div>
           </div>
         </div>
-        <div className="mt-5">
+
+        <div className="mt-5 grid grid-cols-3 gap-2 text-xs">
+          <VitalCell icon={<Shield size={17} />} label="HP" value={profile.hp} max={100} />
+          <VitalCell icon={<Battery size={17} />} label="MP" value={profile.energy} max={100} />
+          <div className="vital-cell flex flex-col items-center justify-center px-2 py-2 text-center">
+            <Flame className="text-system-cyan" size={17} />
+            <p className="status-label mt-1">УСТАЛОСТЬ</p>
+            <p className="font-mono text-lg font-black text-slate-50">{fatigue}</p>
+          </div>
+        </div>
+
+        <div className="mt-4 border border-system-cyan/20 bg-black/18 p-3">
+          <div className="grid grid-cols-2 gap-2">
+            {statusStats.map(({ key, icon: Icon }) => (
+              <div className="status-stat" key={key}>
+                <Icon className="status-stat-icon" size={18} />
+                <div className="min-w-0">
+                  <p className="font-mono text-[11px] font-bold uppercase text-system-muted">{STAT_LABELS_RU[key].short}</p>
+                  <p className="truncate text-xs text-slate-200">{STAT_LABELS_RU[key].label}</p>
+                </div>
+                <p className="status-stat-value">{dashboard.stats[key]}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <Metric label="Сегодня" value={`${completedToday}/${dashboard.todayQuests.length}`} />
+          <Metric label="Босс" value={bossProgress} accent="text-system-warning" />
+          <Metric label="Серия" value={`${profile.streak} дн.`} accent="text-system-success" />
+        </div>
+
+        <div className="mt-4">
           <div className="mb-2 flex justify-between font-mono text-xs text-system-muted">
             <span>XP</span>
             <span>{profile.xp} / {profile.xpToNextLevel}</span>
           </div>
           <ProgressBar value={profile.xp} max={profile.xpToNextLevel} />
         </div>
-      </Panel>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Panel>
-          <div className="mb-3 flex items-center gap-2 text-system-success">
-            <Shield size={17} />
-            <span className="text-xs font-bold uppercase">HP</span>
-          </div>
-          <ProgressBar value={profile.hp} max={100} color="success" />
-          <p className="mt-2 font-mono text-sm">{profile.hp} / 100</p>
-        </Panel>
-        <Panel>
-          <div className="mb-3 flex items-center gap-2 text-system-warning">
-            <Battery size={17} />
-            <span className="text-xs font-bold uppercase">Энергия</span>
-          </div>
-          <ProgressBar value={profile.energy} max={100} color="warning" />
-          <p className="mt-2 font-mono text-sm">{profile.energy} / 100</p>
-        </Panel>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Metric label="Сегодня" value={`${completedToday} / ${dashboard.todayQuests.length} квестов`} />
-        <Metric label="Босс недели" value={boss ? `${boss.progress} / ${boss.target}` : "Нет сигнала"} accent="text-system-warning" />
-      </div>
+      </section>
 
       <Panel className="border-system-cyan/40 bg-system-cyan/8">
         <div className="flex items-start gap-3">
@@ -556,8 +599,21 @@ function DashboardView({
       <div className="grid grid-cols-3 gap-2">
         <PrimaryButton onClick={() => onView("quests")}>К квестам</PrimaryButton>
         <PrimaryButton onClick={() => onView("stats")} variant="ghost">Статы</PrimaryButton>
-        <PrimaryButton onClick={() => onView("boss")} variant="ghost">Бой с боссом</PrimaryButton>
+        <PrimaryButton onClick={() => onView("boss")} variant="ghost">Босс</PrimaryButton>
       </div>
+    </div>
+  );
+}
+
+function VitalCell({ icon, label, value, max }: { icon: ReactNode; label: string; value: number; max: number }) {
+  return (
+    <div className="vital-cell px-2 py-2">
+      <div className="mb-1.5 flex items-center gap-1.5 text-system-cyan">
+        {icon}
+        <span className="status-label">{label}</span>
+      </div>
+      <ProgressBar value={value} max={max} color={label === "HP" ? "success" : "cyan"} />
+      <p className="mt-1 text-right font-mono text-[10px] text-system-muted">{value}/{max}</p>
     </div>
   );
 }
@@ -802,11 +858,11 @@ function ResultModal({ modal, onClose }: { modal: NonNullable<AppModal>; onClose
 
 function ScreenTitle({ title, icon, compact = false }: { title: string; icon: ReactNode; compact?: boolean }) {
   return (
-    <div className={`flex items-center gap-2 ${compact ? "pt-1" : ""}`}>
-      <div className="grid size-9 place-items-center rounded-md border border-system-cyan/40 bg-system-cyan/10 text-system-cyan">
+    <div className={`system-topbar flex items-center gap-2 px-3 py-2 ${compact ? "pt-2" : ""}`}>
+      <div className="grid size-8 place-items-center border border-system-cyan/40 bg-system-cyan/10 text-system-cyan">
         {icon}
       </div>
-      <h2 className="text-xl font-black">{title}</h2>
+      <h2 className="font-mono text-base font-black uppercase text-slate-50">{title}</h2>
     </div>
   );
 }
