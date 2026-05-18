@@ -72,7 +72,7 @@ async function request<T>(path: string, init: RequestInit & { auth?: boolean } =
     | null;
 
   if (!response.ok) {
-    throw new Error(payload?.error?.message ?? `Request failed with ${response.status}`);
+    throw new Error(formatApiError(payload, response.status));
   }
 
   if (!payload || !("data" in payload)) {
@@ -80,4 +80,16 @@ async function request<T>(path: string, init: RequestInit & { auth?: boolean } =
   }
 
   return payload.data as T;
+}
+
+function formatApiError(payload: { error?: { message?: string; details?: unknown } } | null, status: number) {
+  const message = payload?.error?.message ?? `Request failed with ${status}`;
+  const details = payload?.error?.details;
+
+  if (details && typeof details === "object" && "message" in details) {
+    const detailMessage = String((details as { message?: unknown }).message ?? "");
+    if (detailMessage && !message.includes(detailMessage)) return `${message}: ${detailMessage}`;
+  }
+
+  return message;
 }

@@ -5,6 +5,7 @@ import {
 import { requireSession, signSession, validateTelegramInitData } from "./auth.js";
 import { handleTelegramWebhook, setupTelegramWebhook, verifyTelegramWebhookSecret } from "./bot.js";
 import { optionalEnv } from "./env.js";
+import { supabase } from "./db.js";
 import { notFound, readBody, sendData, sendError, unauthorized, type ApiRequest, type ApiResponse } from "./http.js";
 import { hunterService } from "./hunter.js";
 
@@ -42,6 +43,11 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
   if ((method === "GET" || method === "POST") && path === "telegram/setup") {
     verifySetupSecret(req);
     return { data: await setupTelegramWebhook(req) };
+  }
+
+  if (method === "GET" && path === "debug/supabase") {
+    verifySetupSecret(req);
+    return { data: await diagnoseSupabase() };
   }
 
   if (method === "POST" && path === "telegram/webhook") {
@@ -128,6 +134,46 @@ function getPathSegments(req: ApiRequest) {
 
   const url = req.url ? new URL(req.url, "https://local.test") : null;
   return splitSegment(url?.pathname.replace(/^\/api\/?/, "") ?? "").filter(Boolean);
+}
+
+async function diagnoseSupabase() {
+  const tables = ["users", "user_stats", "quest_templates", "quests", "weekly_bosses", "achievements"];
+  const checks = await Promise.all(
+    tables.map(async (table) => {
+      const { count, error } = await supabase.from(table).select("id", { count: "exact", head: true });
+      return {
+        table,
+        ok: !error,
+        count: count ?? null,
+        error: error
+          ? {
+              code: error.code,
+              message: error.message,
+              hint: error.hint,
+              details: error.details
+            }
+          : null
+      };
+    })
+  );
+  const failed = checks.filter((check) => !check.ok);
+
+  return {
+    ok: failed.length === 0,
+    supabaseHost: safeSupabaseHost(),
+    checks,
+    recommendation: failed.length === 0
+      ? "Supabase tables are reachable. If Mini App still fails, clear Telegram WebView cache and reopen from the bot."
+      : "Supabase tables are not reachable. Run supabase/migrations/20260518000000_init_system_hunter.sql and supabase/seed.sql in the same Supabase project used by Vercel, then redeploy."
+  };
+}
+
+function safeSupabaseHost() {
+  try {
+    return new URL(optionalEnv("SUPABASE_URL")).host;
+  } catch {
+    return "invalid SUPABASE_URL";
+  }
 }
 
 function splitSegment(value: string) {
