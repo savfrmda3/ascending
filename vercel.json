@@ -1,6 +1,12 @@
 {
   "framework": "vite",
   "installCommand": "npm ci --include=dev",
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist"
+  "buildCommand": "if [ -d apps/web ]; then npm run build -w @system-hunter/shared && npm run build -w @system-hunter/web && rm -rf dist && cp -R apps/web/dist dist; else npm run build; fi",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
 }
