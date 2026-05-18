@@ -5,7 +5,7 @@ import {
 import { requireSession, signSession, validateTelegramInitData } from "./auth.js";
 import { handleTelegramWebhook, setupTelegramWebhook, verifyTelegramWebhookSecret } from "./bot.js";
 import { optionalEnv } from "./env.js";
-import { supabase } from "./db.js";
+import { supabase, supabaseUrl } from "./db.js";
 import { notFound, readBody, sendData, sendError, unauthorized, type ApiRequest, type ApiResponse } from "./http.js";
 import { hunterService } from "./hunter.js";
 
@@ -170,6 +170,7 @@ async function diagnoseSupabase() {
   return {
     ok: failed.length === 0,
     supabaseHost: safeSupabaseHost(),
+    normalizedSupabaseUrl: supabaseUrl,
     checks,
     recommendation: failed.length === 0
       ? "Supabase tables are reachable. If Mini App still fails, clear Telegram WebView cache and reopen from the bot."
@@ -179,7 +180,7 @@ async function diagnoseSupabase() {
 
 function safeSupabaseHost() {
   try {
-    return new URL(optionalEnv("SUPABASE_URL")).host;
+    return new URL(supabaseUrl).host;
   } catch {
     return "invalid SUPABASE_URL";
   }
