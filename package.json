@@ -15,9 +15,23 @@
     "build": "npm run build -w @system-hunter/shared && npm run build -w @system-hunter/api && npm run build -w @system-hunter/bot && npm run build -w @system-hunter/web",
     "typecheck": "npm run build -w @system-hunter/shared && npm run typecheck -w @system-hunter/api && npm run typecheck -w @system-hunter/bot && npm run typecheck -w @system-hunter/web"
   },
+  "dependencies": {
+    "@types/node": "^22.10.7",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "lucide-react": "^0.468.0",
+    "postcss": "^8.4.49",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "zod": "^3.24.1"
+  },
   "devDependencies": {
-    "concurrently": "^9.1.2",
-    "typescript": "^5.7.3"
+    "concurrently": "^9.1.2"
   },
   "engines": {
     "node": ">=20"
