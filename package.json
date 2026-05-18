@@ -1,0 +1,25 @@
+{
+  "name": "system-hunter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:bot\" \"npm run dev:web\"",
+    "dev:api": "npm run dev -w @system-hunter/api",
+    "dev:bot": "npm run dev -w @system-hunter/bot",
+    "dev:web": "npm run dev -w @system-hunter/web",
+    "build": "npm run build -w @system-hunter/shared && npm run build -w @system-hunter/api && npm run build -w @system-hunter/bot && npm run build -w @system-hunter/web",
+    "typecheck": "npm run build -w @system-hunter/shared && npm run typecheck -w @system-hunter/api && npm run typecheck -w @system-hunter/bot && npm run typecheck -w @system-hunter/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

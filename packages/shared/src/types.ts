@@ -1,0 +1,154 @@
+export type Rank = "E" | "D" | "C" | "B" | "A" | "S";
+
+export type StatKey =
+  | "strength"
+  | "intelligence"
+  | "vitality"
+  | "discipline"
+  | "focus"
+  | "charisma";
+
+export type QuestCategory = StatKey;
+export type Difficulty = "easy" | "medium" | "hard";
+export type QuestStatus = "active" | "completed" | "skipped";
+export type BossStatus = "active" | "completed" | "expired";
+
+export interface HunterProfile {
+  id: string;
+  telegramId: number;
+  username: string | null;
+  firstName: string | null;
+  level: number;
+  xp: number;
+  xpToNextLevel: number;
+  rank: Rank;
+  streak: number;
+  hp: number;
+  energy: number;
+  className: string;
+  currentTitle: string | null;
+  totalXp: number;
+  completedQuestsCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserStats {
+  id: string;
+  userId: string;
+  strength: number;
+  intelligence: number;
+  vitality: number;
+  discipline: number;
+  focus: number;
+  charisma: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Quest {
+  id: string;
+  userId: string;
+  title: string;
+  description: string;
+  type: "daily" | "generated";
+  category: QuestCategory;
+  difficulty: Difficulty;
+  xpReward: number;
+  statRewardKey: StatKey;
+  statRewardValue: number;
+  status: QuestStatus;
+  dueDate: string;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+export interface QuestTemplate {
+  id?: string;
+  title: string;
+  description: string;
+  category: QuestCategory;
+  difficulty: Difficulty;
+  xpReward: number;
+  statRewardKey: StatKey;
+  statRewardValue: number;
+  isActive?: boolean;
+}
+
+export interface WeeklyBoss {
+  id: string;
+  userId: string;
+  name: string;
+  description: string;
+  objective: string;
+  progress: number;
+  target: number;
+  xpReward: number;
+  statRewardKey: StatKey;
+  statRewardValue: number;
+  status: BossStatus;
+  startsAt: string;
+  endsAt: string;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+export interface Achievement {
+  id: string;
+  userId: string;
+  key: string;
+  title: string;
+  description: string;
+  unlockedAt: string;
+}
+
+export interface DashboardSummary {
+  profile: HunterProfile;
+  stats: UserStats;
+  todayQuests: Quest[];
+  boss: WeeklyBoss | null;
+  achievements: Achievement[];
+}
+
+export interface QuestCompletionResult {
+  quest: Quest;
+  profile: HunterProfile;
+  stats: UserStats;
+  rewards: {
+    xp: number;
+    statKey: StatKey;
+    statValue: number;
+  };
+  levelUp: {
+    leveledUp: boolean;
+    from: number;
+    to: number;
+  };
+  unlockedAchievements: Achievement[];
+}
+
+export interface BossProgressResult {
+  boss: WeeklyBoss;
+  profile: HunterProfile;
+  stats: UserStats;
+  victory: boolean;
+  unlockedAchievements: Achievement[];
+}
+
+export interface AuthResponse {
+  token: string;
+  profile: HunterProfile;
+  stats: UserStats;
+}
+
+export interface ApiErrorBody {
+  error: {
+    code: string;
+    message: string;
+    details?: unknown;
+  };
+}
+
+export interface ApiSuccess<T> {
+  data: T;
+}
