@@ -1,0 +1,6 @@
+{
+  "framework": "vite",
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build -w @system-hunter/shared && npm run build -w @system-hunter/web",
+  "outputDirectory": "apps/web/dist"
+}
