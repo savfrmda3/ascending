@@ -137,20 +137,29 @@ function getPathSegments(req: ApiRequest) {
 }
 
 async function diagnoseSupabase() {
-  const tables = ["users", "user_stats", "quest_templates", "quests", "weekly_bosses", "achievements"];
+  const tables = [
+    { table: "users", columns: "id,telegram_id,username,created_at" },
+    { table: "user_stats", columns: "id,user_id,strength,focus" },
+    { table: "quest_templates", columns: "id,title,category" },
+    { table: "quests", columns: "id,user_id,title,status" },
+    { table: "weekly_bosses", columns: "id,user_id,name,status" },
+    { table: "achievements", columns: "id,user_id,key,title" }
+  ];
   const checks = await Promise.all(
-    tables.map(async (table) => {
+    tables.map(async ({ table, columns }) => {
       const { count, error } = await supabase.from(table).select("id", { count: "exact", head: true });
+      const { data: sample, error: sampleError } = await supabase.from(table).select(columns).limit(1);
       return {
         table,
-        ok: !error,
+        ok: !error && !sampleError,
         count: count ?? null,
-        error: error
+        sampleCount: sample?.length ?? null,
+        error: error || sampleError
           ? {
-              code: error.code,
-              message: error.message,
-              hint: error.hint,
-              details: error.details
+              code: (error || sampleError)?.code,
+              message: (error || sampleError)?.message,
+              hint: (error || sampleError)?.hint,
+              details: (error || sampleError)?.details
             }
           : null
       };

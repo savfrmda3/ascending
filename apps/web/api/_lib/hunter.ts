@@ -34,6 +34,18 @@ const ACHIEVEMENTS: Record<string, { title: string; description: string }> = {
   discipline_initiate: { title: "Discipline Initiate", description: "Complete 10 discipline quests." }
 };
 
+const USER_COLUMNS =
+  "id,telegram_id,username,first_name,level,xp,rank,streak,hp,energy,current_title,created_at,updated_at";
+const USER_STATS_COLUMNS =
+  "id,user_id,strength,intelligence,vitality,discipline,focus,charisma,created_at,updated_at";
+const QUEST_COLUMNS =
+  "id,user_id,title,description,type,category,difficulty,xp_reward,stat_reward_key,stat_reward_value,status,due_date,completed_at,created_at";
+const BOSS_COLUMNS =
+  "id,user_id,name,description,objective,progress,target,xp_reward,stat_reward_key,stat_reward_value,status,starts_at,ends_at,completed_at,created_at";
+const ACHIEVEMENT_COLUMNS = "id,user_id,key,title,description,unlocked_at";
+const QUEST_TEMPLATE_COLUMNS =
+  "id,title,description,category,difficulty,xp_reward,stat_reward_key,stat_reward_value,is_active";
+
 export class HunterService {
   async syncTelegramUser(input: TelegramUserInput) {
     const user = await this.createOrUpdateUser(input);
@@ -95,7 +107,7 @@ export class HunterService {
     await this.ensureDailyQuests(userId);
     const { data, error } = await supabase
       .from("quests")
-      .select("*")
+      .select(QUEST_COLUMNS)
       .eq("user_id", userId)
       .eq("due_date", todayDateString())
       .order("created_at", { ascending: true });
@@ -127,7 +139,7 @@ export class HunterService {
         stat_reward_value: template.statRewardValue,
         due_date: todayDateString()
       })
-      .select("*")
+      .select(QUEST_COLUMNS)
       .single();
 
     if (error || !data) throw badRequest("Unable to generate quest", error);
@@ -149,7 +161,7 @@ export class HunterService {
       .update({ status: "completed", completed_at: new Date().toISOString() })
       .eq("id", questId)
       .eq("user_id", userId)
-      .select("*")
+      .select(QUEST_COLUMNS)
       .single();
 
     if (error || !data) throw badRequest("Unable to complete quest", error);
@@ -193,7 +205,7 @@ export class HunterService {
       .update({ status: "skipped" })
       .eq("id", questId)
       .eq("user_id", userId)
-      .select("*")
+      .select(QUEST_COLUMNS)
       .single();
 
     if (error || !data) throw badRequest("Unable to skip quest", error);
@@ -205,7 +217,7 @@ export class HunterService {
     const { startsAt, endsAt } = getWeekRange();
     const { data, error } = await supabase
       .from("weekly_bosses")
-      .select("*")
+      .select(BOSS_COLUMNS)
       .eq("user_id", userId)
       .eq("starts_at", startsAt)
       .eq("ends_at", endsAt)
@@ -237,7 +249,7 @@ export class HunterService {
       })
       .eq("id", bossId)
       .eq("user_id", userId)
-      .select("*")
+      .select(BOSS_COLUMNS)
       .single();
 
     if (error || !data) throw badRequest("Unable to update boss progress", error);
@@ -260,7 +272,7 @@ export class HunterService {
   async getAchievements(userId: string) {
     const { data, error } = await supabase
       .from("achievements")
-      .select("*")
+      .select(ACHIEVEMENT_COLUMNS)
       .eq("user_id", userId)
       .order("unlocked_at", { ascending: false });
 
@@ -279,7 +291,7 @@ export class HunterService {
           updated_at: new Date().toISOString()
         })
         .eq("id", existing.id)
-        .select("*")
+        .select(USER_COLUMNS)
         .single();
 
       if (error || !data) throw badRequest("Unable to update user", error);
@@ -294,7 +306,7 @@ export class HunterService {
         first_name: input.firstName ?? null,
         rank: rankForLevel(1)
       })
-      .select("*")
+      .select(USER_COLUMNS)
       .single();
 
     if (error || !data) throw badRequest("Unable to create user", error);
@@ -304,7 +316,7 @@ export class HunterService {
   private async findUserByTelegramId(telegramId: number) {
     const { data, error } = await supabase
       .from("users")
-      .select("*")
+      .select(USER_COLUMNS)
       .eq("telegram_id", telegramId)
       .maybeSingle();
 
@@ -319,7 +331,7 @@ export class HunterService {
   }
 
   private async getUser(userId: string) {
-    const { data, error } = await supabase.from("users").select("*").eq("id", userId).maybeSingle();
+    const { data, error } = await supabase.from("users").select(USER_COLUMNS).eq("id", userId).maybeSingle();
     if (error) throw badRequest("Unable to load user", error);
     if (!data) throw notFound("User not found");
     return data;
@@ -328,7 +340,7 @@ export class HunterService {
   private async ensureStats(userId: string) {
     const { data, error } = await supabase
       .from("user_stats")
-      .select("*")
+      .select(USER_STATS_COLUMNS)
       .eq("user_id", userId)
       .maybeSingle();
 
@@ -338,7 +350,7 @@ export class HunterService {
     const { data: created, error: createError } = await supabase
       .from("user_stats")
       .insert({ user_id: userId })
-      .select("*")
+      .select(USER_STATS_COLUMNS)
       .single();
 
     if (createError || !created) throw badRequest("Unable to create stats", createError);
@@ -404,7 +416,7 @@ export class HunterService {
   }
 
   private async getQuestTemplates() {
-    const { data, error } = await supabase.from("quest_templates").select("*").eq("is_active", true);
+    const { data, error } = await supabase.from("quest_templates").select(QUEST_TEMPLATE_COLUMNS).eq("is_active", true);
     if (error || !data || data.length === 0) return DEFAULT_QUEST_TEMPLATES;
 
     return data.map((row: any) => ({
@@ -421,7 +433,7 @@ export class HunterService {
   private async getQuest(userId: string, questId: string) {
     const { data, error } = await supabase
       .from("quests")
-      .select("*")
+      .select(QUEST_COLUMNS)
       .eq("id", questId)
       .eq("user_id", userId)
       .maybeSingle();
@@ -434,7 +446,7 @@ export class HunterService {
   private async getBoss(userId: string, bossId: string) {
     const { data, error } = await supabase
       .from("weekly_bosses")
-      .select("*")
+      .select(BOSS_COLUMNS)
       .eq("id", bossId)
       .eq("user_id", userId)
       .maybeSingle();
@@ -574,7 +586,7 @@ export class HunterService {
       }));
 
     if (rows.length === 0) return [];
-    const { data, error } = await supabase.from("achievements").insert(rows).select("*");
+    const { data, error } = await supabase.from("achievements").insert(rows).select(ACHIEVEMENT_COLUMNS);
     if (error) throw badRequest("Unable to unlock achievement", error);
     return (data ?? []).map(toAchievement);
   }
@@ -654,4 +666,3 @@ function pickRandom<T>(items: T[], count: number) {
 function sumRewards(rows: any[] | null) {
   return (rows ?? []).reduce((total, row) => total + Number(row.xp_reward ?? 0), 0);
 }
-
