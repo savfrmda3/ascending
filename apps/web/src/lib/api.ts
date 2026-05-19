@@ -2,6 +2,7 @@ import type {
   AuthResponse,
   BossProgressResult,
   DashboardSummary,
+  ProgressHistory,
   Quest,
   QuestCompletionResult,
   UserSettings
@@ -35,6 +36,10 @@ export async function authenticateTelegram(initData: string) {
 
 export function getDashboard() {
   return request<DashboardSummary>("/api/me");
+}
+
+export function getProgressHistory() {
+  return request<ProgressHistory>("/api/progress/history");
 }
 
 export function updateSettings(input: Partial<UserSettings>) {
@@ -162,6 +167,8 @@ function translateApiMessage(message?: string) {
     "Unable to calculate streak": "Не удалось рассчитать серию",
     "Unable to inspect achievements": "Не удалось проверить достижения",
     "Unable to unlock achievement": "Не удалось открыть достижение",
+    "Unable to load progress history": "Не удалось загрузить историю прогресса",
+    "Unable to load recent quests": "Не удалось загрузить последние квесты",
     "Achievement unlocked.": "Достижение открыто.",
     "Invalid JSON body": "Некорректный запрос к серверу",
     "Request body is too large": "Запрос слишком большой",

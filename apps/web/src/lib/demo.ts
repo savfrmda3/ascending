@@ -1,4 +1,4 @@
-import { xpToNextLevel, type DashboardSummary } from "@system-hunter/shared";
+import { xpToNextLevel, type DashboardSummary, type ProgressHistory, type Quest } from "@system-hunter/shared";
 
 const now = new Date().toISOString();
 const today = now.slice(0, 10);
@@ -137,3 +137,106 @@ export const demoDashboard: DashboardSummary = {
     }
   ]
 };
+
+const demoRecentQuests: Quest[] = [
+  ...demoDashboard.todayQuests,
+  {
+    ...demoDashboard.todayQuests[1]!,
+    id: "quest-demo-old-1",
+    status: "completed",
+    dueDate: addDaysToDateString(today, -1),
+    completedAt: addDaysToDateString(today, -1)
+  },
+  {
+    ...demoDashboard.todayQuests[0]!,
+    id: "quest-demo-old-2",
+    status: "skipped",
+    dueDate: addDaysToDateString(today, -2),
+    completedAt: null
+  }
+];
+
+export const demoProgressHistory: ProgressHistory = {
+  calendar: Array.from({ length: 30 }, (_, index) => {
+    const date = addDaysToDateString(today, index - 29);
+    const completed = index % 5 === 0 ? 0 : Math.min(3, 1 + (index % 3));
+    const skipped = index % 7 === 0 ? 1 : 0;
+    return {
+      date,
+      total: completed + skipped + 1,
+      completed,
+      skipped,
+      replaced: index % 11 === 0 ? 1 : 0,
+      xp: completed * 25
+    };
+  }),
+  recentQuests: demoRecentQuests,
+  weeklyRecap: {
+    startsAt: addDaysToDateString(today, -3),
+    endsAt: addDaysToDateString(today, 3),
+    completed: 9,
+    skipped: 1,
+    replaced: 1,
+    xp: 260,
+    strongestCategory: "focus",
+    weakestCategory: "strength"
+  },
+  achievementCollection: [
+    {
+      key: "first_quest",
+      title: "Первый квест",
+      description: "Выполни первый ежедневный квест.",
+      rarity: "common",
+      unlocked: true,
+      unlockedAt: now,
+      progress: 1,
+      target: 1
+    },
+    {
+      key: "streak_3",
+      title: "Серия 3 дня",
+      description: "Выполняй квесты три дня подряд.",
+      rarity: "common",
+      unlocked: true,
+      unlockedAt: now,
+      progress: 3,
+      target: 3
+    },
+    {
+      key: "streak_7",
+      title: "Серия 7 дней",
+      description: "Выполняй квесты семь дней подряд.",
+      rarity: "rare",
+      unlocked: false,
+      unlockedAt: null,
+      progress: 4,
+      target: 7
+    },
+    {
+      key: "focus_hunter",
+      title: "Охотник фокуса",
+      description: "Выполни 10 квестов фокуса.",
+      rarity: "epic",
+      unlocked: false,
+      unlockedAt: null,
+      progress: 8,
+      target: 10
+    },
+    {
+      key: "streak_30",
+      title: "Серия 30 дней",
+      description: "Закрой месяц без потери ежедневного ритма.",
+      rarity: "legendary",
+      unlocked: false,
+      unlockedAt: null,
+      progress: 4,
+      target: 30
+    }
+  ]
+};
+
+function addDaysToDateString(dateString: string, days: number) {
+  const next = new Date(`${dateString}T00:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next.toISOString().slice(0, 10);
+}

@@ -157,6 +157,10 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
     return { data: await hunterService.getAchievements(session.userId) };
   }
 
+  if (method === "GET" && path === "progress/history") {
+    return { data: await hunterService.getProgressHistory(session.userId) };
+  }
+
   throw notFound("Route not found");
 }
 

@@ -187,6 +187,15 @@ router.get(
   })
 );
 
+router.get(
+  "/api/progress/history",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw badRequest("Missing auth context");
+    res.json({ data: await hunterService.getProgressHistory(req.auth.userId) });
+  })
+);
+
 router.post(
   "/api/bot/user/sync",
   requireBotToken,

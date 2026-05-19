@@ -3,6 +3,7 @@ import {
   BarChart3,
   Battery,
   Brain,
+  CalendarDays,
   Crosshair,
   Dumbbell,
   Flame,
@@ -24,16 +25,17 @@ import {
   xpToNextLevel,
   type BossProgressResult,
   type DashboardSummary,
+  type ProgressHistory,
   type Quest,
   type QuestCompletionResult,
   type StatKey,
   type UserSettings
 } from "@system-hunter/shared";
 import { Modal, Panel, PrimaryButton, ProgressBar, Metric } from "./components/ui.js";
-import { authenticateTelegram, completeQuest, generateQuest, getDashboard, replaceQuest, skipQuest, updateSettings } from "./lib/api.js";
-import { demoDashboard } from "./lib/demo.js";
+import { authenticateTelegram, completeQuest, generateQuest, getDashboard, getProgressHistory, replaceQuest, skipQuest, updateSettings } from "./lib/api.js";
+import { demoDashboard, demoProgressHistory } from "./lib/demo.js";
 
-type View = "dashboard" | "quests" | "stats" | "boss" | "profile" | "settings";
+type View = "dashboard" | "quests" | "stats" | "boss" | "profile" | "settings" | "progress";
 type AppModal =
   | { type: "quest"; result: QuestCompletionResult }
   | { type: "boss"; result: BossProgressResult }
@@ -95,6 +97,13 @@ const STATUS_LABELS_RU: Record<Quest["status"], string> = {
   completed: "Выполнен",
   skipped: "Пропущен",
   replaced: "Заменен"
+};
+
+const RARITY_LABELS_RU: Record<ProgressHistory["achievementCollection"][number]["rarity"], string> = {
+  common: "Обычное",
+  rare: "Редкое",
+  epic: "Эпическое",
+  legendary: "Легендарное"
 };
 
 const CLASS_LABELS_RU: Record<string, string> = {
@@ -172,7 +181,13 @@ const ACHIEVEMENT_TEXT_RU: Record<string, { title: string; description: string }
   first_level_up: { title: "Первое повышение", description: "Получи новый уровень впервые." },
   boss_slayer: { title: "Победитель босса", description: "Победи первого недельного босса." },
   focus_hunter: { title: "Охотник фокуса", description: "Выполни 10 квестов фокуса." },
-  discipline_initiate: { title: "Адепт дисциплины", description: "Выполни 10 квестов дисциплины." }
+  discipline_initiate: { title: "Адепт дисциплины", description: "Выполни 10 квестов дисциплины." },
+  streak_14: { title: "Серия 14 дней", description: "Удержи дисциплину две недели подряд." },
+  streak_30: { title: "Серия 30 дней", description: "Закрой месяц без потери ежедневного ритма." },
+  strength_path: { title: "Путь силы", description: "Выполни 10 квестов силы." },
+  vitality_path: { title: "Путь восстановления", description: "Выполни 10 квестов здоровья." },
+  intelligence_path: { title: "Путь разума", description: "Выполни 10 квестов интеллекта." },
+  charisma_path: { title: "Путь голоса", description: "Выполни 10 квестов харизмы." }
 };
 
 const TITLE_LABELS_RU: Record<string, string> = {
@@ -205,7 +220,7 @@ function displayBossText(text: string) {
   return translateKnownText(text, BOSS_TEXT_RU);
 }
 
-function displayAchievement(achievement: DashboardSummary["achievements"][number]) {
+function displayAchievement(achievement: { key: string; title: string; description: string }) {
   return ACHIEVEMENT_TEXT_RU[achievement.key] ?? {
     title: achievement.title,
     description: achievement.description
@@ -219,6 +234,8 @@ function formatRuDate(value: string) {
 export function App() {
   const [view, setView] = useState<View>("dashboard");
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
+  const [progressHistory, setProgressHistory] = useState<ProgressHistory | null>(null);
+  const [progressLoading, setProgressLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -247,6 +264,11 @@ export function App() {
     void boot();
   }, []);
 
+  useEffect(() => {
+    if (view !== "progress" || !dashboard) return;
+    void loadProgressHistory();
+  }, [view, demoMode, dashboard?.profile.id]);
+
   const completedToday = useMemo(
     () => dashboard?.todayQuests.filter((quest) => quest.status === "completed").length ?? 0,
     [dashboard]
@@ -255,6 +277,23 @@ export function App() {
   async function refresh() {
     if (demoMode) return;
     setDashboard(await getDashboard());
+    setProgressHistory(null);
+  }
+
+  async function loadProgressHistory() {
+    setProgressLoading(true);
+    try {
+      if (demoMode) {
+        setProgressHistory(demoProgressHistory);
+        return;
+      }
+
+      setProgressHistory(await getProgressHistory());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось загрузить историю прогресса");
+    } finally {
+      setProgressLoading(false);
+    }
   }
 
   async function onSaveSettings(input: Partial<UserSettings>) {
@@ -580,7 +619,15 @@ export function App() {
             ) : null}
             {view === "stats" ? <StatsView dashboard={dashboard} /> : null}
             {view === "boss" ? <BossView dashboard={dashboard} onView={setView} /> : null}
-            {view === "profile" ? <ProfileView dashboard={dashboard} onOpenSettings={() => setView("settings")} /> : null}
+            {view === "progress" ? (
+              <ProgressView
+                history={progressHistory}
+                loading={progressLoading}
+                onRefresh={() => void loadProgressHistory()}
+                onView={setView}
+              />
+            ) : null}
+            {view === "profile" ? <ProfileView dashboard={dashboard} onOpenSettings={() => setView("settings")} onView={setView} /> : null}
             {view === "settings" ? (
               <SettingsView
                 busy={busyId === "settings"}
@@ -778,10 +825,11 @@ function DashboardView({
         </div>
       </Panel>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <PrimaryButton onClick={() => onView("quests")}>К квестам</PrimaryButton>
         <PrimaryButton onClick={() => onView("stats")} variant="ghost">Статы</PrimaryButton>
         <PrimaryButton onClick={() => onView("boss")} variant="ghost">Босс</PrimaryButton>
+        <PrimaryButton onClick={() => onView("progress")} variant="ghost">История</PrimaryButton>
       </div>
     </div>
   );
@@ -1140,7 +1188,160 @@ function SettingsView({
   );
 }
 
-function ProfileView({ dashboard, onOpenSettings }: { dashboard: DashboardSummary; onOpenSettings: () => void }) {
+function ProgressView({
+  history,
+  loading,
+  onRefresh,
+  onView
+}: {
+  history: ProgressHistory | null;
+  loading: boolean;
+  onRefresh: () => void;
+  onView: (view: View) => void;
+}) {
+  if (loading || !history) {
+    return (
+      <div className="space-y-4">
+        <ScreenTitle title="История прогресса" icon={<CalendarDays size={20} />} />
+        <Panel glow>
+          <p className="font-mono text-sm font-bold uppercase text-system-cyan">СИНХРОНИЗАЦИЯ</p>
+          <p className="mt-2 text-sm text-system-muted">Система собирает историю квестов, недельный отчет и коллекцию достижений.</p>
+        </Panel>
+      </div>
+    );
+  }
+
+  const activeDays = history.calendar.filter((day) => day.total > 0).length;
+  const perfectDays = history.calendar.filter((day) => day.total > 0 && day.completed === day.total).length;
+
+  return (
+    <div className="space-y-4">
+      <ScreenTitle title="История прогресса" icon={<CalendarDays size={20} />} />
+
+      <Panel glow>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-mono text-xs font-bold uppercase text-system-cyan">Недельный отчет</p>
+            <h2 className="mt-1 text-lg font-black">
+              {formatRuDate(history.weeklyRecap.startsAt)} - {formatRuDate(history.weeklyRecap.endsAt)}
+            </h2>
+          </div>
+          <PrimaryButton onClick={onRefresh} variant="ghost">Обновить</PrimaryButton>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Metric label="Выполнено" value={`${history.weeklyRecap.completed}`} accent="text-system-success" />
+          <Metric label="Потери" value={`${history.weeklyRecap.skipped + history.weeklyRecap.replaced}`} accent="text-system-danger" />
+          <Metric label="XP недели" value={`${history.weeklyRecap.xp}`} accent="text-system-warning" />
+          <Metric label="Активных дней" value={`${activeDays}/30`} accent="text-system-cyan" />
+          <Metric
+            label="Сильная зона"
+            value={history.weeklyRecap.strongestCategory ? CATEGORY_LABELS_RU[history.weeklyRecap.strongestCategory] : "Нет данных"}
+          />
+          <Metric
+            label="Риск недели"
+            value={history.weeklyRecap.weakestCategory ? CATEGORY_LABELS_RU[history.weeklyRecap.weakestCategory] : "Нет данных"}
+            accent={history.weeklyRecap.weakestCategory ? "text-system-warning" : "text-system-muted"}
+          />
+        </div>
+      </Panel>
+
+      <Panel>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="font-mono text-xs font-bold uppercase text-system-muted">Календарь 30 дней</p>
+            <p className="mt-1 text-sm text-system-muted">Идеальных дней: {perfectDays}</p>
+          </div>
+          <PrimaryButton onClick={() => onView("quests")} variant="ghost">Квесты</PrimaryButton>
+        </div>
+        <div className="mt-4 grid grid-cols-10 gap-1.5">
+          {history.calendar.map((day) => (
+            <div
+              aria-label={`${formatRuDate(day.date)}: выполнено ${day.completed} из ${day.total}`}
+              className={`h-7 border ${calendarCellClass(day)}`}
+              key={day.date}
+              role="img"
+              title={`${formatRuDate(day.date)}: ${day.completed}/${day.total}, XP ${day.xp}`}
+            />
+          ))}
+        </div>
+      </Panel>
+
+      <Panel>
+        <p className="font-mono text-xs font-bold uppercase text-system-muted">Последние действия</p>
+        <div className="mt-3 space-y-2">
+          {history.recentQuests.length === 0 ? (
+            <p className="text-sm text-system-muted">История квестов пока пуста.</p>
+          ) : (
+            history.recentQuests.slice(0, 8).map((quest) => (
+              <div key={quest.id} className="flex items-center justify-between gap-3 border border-system-border bg-black/20 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">{displayQuestTitle(quest)}</p>
+                  <p className="mt-0.5 text-xs text-system-muted">
+                    {formatRuDate(quest.dueDate)} / {CATEGORY_LABELS_RU[quest.category]} / +{quest.xpReward} XP
+                  </p>
+                </div>
+                <StatusPill status={quest.status} />
+              </div>
+            ))
+          )}
+        </div>
+      </Panel>
+
+      <ScreenTitle title="Коллекция достижений" icon={<Trophy size={20} />} compact />
+      <div className="space-y-3">
+        {history.achievementCollection.map((achievement) => {
+          const translated = displayAchievement(achievement);
+          return (
+            <Panel
+              key={achievement.key}
+              className={achievement.unlocked ? rarityBorderClass(achievement.rarity) : "border-system-border opacity-80"}
+            >
+              <div className="flex items-start gap-3">
+                <div className={`grid size-10 shrink-0 place-items-center border ${achievement.unlocked ? "border-system-warning/40 bg-system-warning/10 text-system-warning" : "border-system-border bg-white/5 text-system-muted"}`}>
+                  <Trophy size={18} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-bold">{translated.title}</h3>
+                    <span className={`border px-2 py-0.5 font-mono text-[10px] uppercase ${rarityPillClass(achievement.rarity)}`}>
+                      {RARITY_LABELS_RU[achievement.rarity]}
+                    </span>
+                    {!achievement.unlocked ? (
+                      <span className="border border-system-border bg-white/5 px-2 py-0.5 font-mono text-[10px] uppercase text-system-muted">
+                        Закрыто
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-1 text-sm text-system-muted">{translated.description}</p>
+                  <div className="mt-3">
+                    <div className="mb-1 flex justify-between font-mono text-[11px] text-system-muted">
+                      <span>Прогресс</span>
+                      <span>{achievement.progress} / {achievement.target}</span>
+                    </div>
+                    <ProgressBar value={achievement.progress} max={achievement.target} color={rarityProgressColor(achievement.rarity)} />
+                  </div>
+                  {achievement.unlockedAt ? (
+                    <p className="mt-2 text-xs text-system-success">Открыто: {formatRuDate(achievement.unlockedAt)}</p>
+                  ) : null}
+                </div>
+              </div>
+            </Panel>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ProfileView({
+  dashboard,
+  onOpenSettings,
+  onView
+}: {
+  dashboard: DashboardSummary;
+  onOpenSettings: () => void;
+  onView: (view: View) => void;
+}) {
   return (
     <div className="space-y-4">
       <ScreenTitle title="Профиль" icon={<User size={20} />} />
@@ -1174,6 +1375,17 @@ function ProfileView({ dashboard, onOpenSettings }: { dashboard: DashboardSummar
             </p>
           </div>
           <PrimaryButton onClick={onOpenSettings} variant="ghost">Изменить</PrimaryButton>
+        </div>
+      </Panel>
+
+      <Panel className="border-system-cyan/35 bg-system-cyan/8">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-mono text-xs font-bold uppercase text-system-muted">Журнал прогресса</p>
+            <h2 className="mt-1 font-bold">История, календарь и закрытые достижения</h2>
+            <p className="mt-1 text-sm text-system-muted">Проверь динамику недели, последние действия и путь до следующих наград.</p>
+          </div>
+          <PrimaryButton onClick={() => onView("progress")} variant="ghost">Открыть</PrimaryButton>
         </div>
       </Panel>
 
@@ -1292,4 +1504,33 @@ function difficultyColor(difficulty: Quest["difficulty"]) {
   if (difficulty === "hard") return "text-system-danger";
   if (difficulty === "medium") return "text-system-warning";
   return "text-system-success";
+}
+
+function calendarCellClass(day: ProgressHistory["calendar"][number]) {
+  if (day.total === 0) return "border-system-border bg-white/5";
+  if (day.completed === day.total) return "border-system-success/60 bg-system-success/35 shadow-cyan";
+  if (day.completed > 0) return "border-system-cyan/55 bg-system-cyan/25";
+  if (day.skipped > 0 || day.replaced > 0) return "border-system-danger/55 bg-system-danger/25";
+  return "border-system-border bg-white/10";
+}
+
+function rarityProgressColor(rarity: ProgressHistory["achievementCollection"][number]["rarity"]): "success" | "warning" | "danger" | "cyan" {
+  if (rarity === "legendary") return "danger";
+  if (rarity === "epic") return "warning";
+  if (rarity === "rare") return "cyan";
+  return "success";
+}
+
+function rarityBorderClass(rarity: ProgressHistory["achievementCollection"][number]["rarity"]) {
+  if (rarity === "legendary") return "border-system-danger/50";
+  if (rarity === "epic") return "border-system-warning/50";
+  if (rarity === "rare") return "border-system-cyan/45";
+  return "border-system-success/40";
+}
+
+function rarityPillClass(rarity: ProgressHistory["achievementCollection"][number]["rarity"]) {
+  if (rarity === "legendary") return "border-system-danger/50 bg-system-danger/10 text-system-danger";
+  if (rarity === "epic") return "border-system-warning/50 bg-system-warning/10 text-system-warning";
+  if (rarity === "rare") return "border-system-cyan/50 bg-system-cyan/10 text-system-cyan";
+  return "border-system-success/50 bg-system-success/10 text-system-success";
 }

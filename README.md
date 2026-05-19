@@ -131,6 +131,10 @@ This mode loads the full Mini App UI with demo data only. It does not expose rea
 
 On first real Telegram launch the Mini App asks the user to configure goal, difficulty, daily quest count, day rhythm, physical-task limits, and preferred categories. These values are stored in `user_settings` and influence daily/generated quest selection. If the new migration has not been applied yet, the app falls back to default settings so the current production deploy keeps opening, but settings cannot be saved until the table exists.
 
+## Progress History
+
+The Mini App has a progress journal with a 30-day quest calendar, current weekly recap, recent quest history, and a locked/unlocked achievement collection. It is built from existing `quests`, `weekly_bosses`, and `achievements` tables, so this stage does not require a new migration.
+
 ## Main Endpoints
 
 - `GET /api/health`
@@ -145,6 +149,7 @@ On first real Telegram launch the Mini App asks the user to configure goal, diff
 - `GET /api/boss/current`
 - `POST /api/boss/:id/progress`
 - `GET /api/achievements`
+- `GET /api/progress/history`
 - `POST /api/telegram/webhook`
 - `GET /api/telegram/setup?secret=...`
 

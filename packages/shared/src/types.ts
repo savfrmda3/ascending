@@ -13,6 +13,7 @@ export type Difficulty = "easy" | "medium" | "hard";
 export type QuestStatus = "active" | "completed" | "skipped" | "replaced";
 export type BossStatus = "active" | "completed" | "expired";
 export type HunterGoal = "sport" | "discipline" | "study" | "focus" | "health" | "charisma";
+export type AchievementRarity = "common" | "rare" | "epic" | "legendary";
 
 export interface HunterProfile {
   id: string;
@@ -105,6 +106,17 @@ export interface Achievement {
   unlockedAt: string;
 }
 
+export interface AchievementCollectionItem {
+  key: string;
+  title: string;
+  description: string;
+  rarity: AchievementRarity;
+  unlocked: boolean;
+  unlockedAt: string | null;
+  progress: number;
+  target: number;
+}
+
 export interface UserSettings {
   id: string;
   userId: string;
@@ -127,6 +139,33 @@ export interface DashboardSummary {
   todayQuests: Quest[];
   boss: WeeklyBoss | null;
   achievements: Achievement[];
+}
+
+export interface ProgressDay {
+  date: string;
+  total: number;
+  completed: number;
+  skipped: number;
+  replaced: number;
+  xp: number;
+}
+
+export interface WeeklyRecap {
+  startsAt: string;
+  endsAt: string;
+  completed: number;
+  skipped: number;
+  replaced: number;
+  xp: number;
+  strongestCategory: QuestCategory | null;
+  weakestCategory: QuestCategory | null;
+}
+
+export interface ProgressHistory {
+  calendar: ProgressDay[];
+  recentQuests: Quest[];
+  weeklyRecap: WeeklyRecap;
+  achievementCollection: AchievementCollectionItem[];
 }
 
 export interface QuestCompletionResult {

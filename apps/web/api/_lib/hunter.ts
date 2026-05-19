@@ -7,10 +7,14 @@ import {
   rankForLevel,
   xpToNextLevel,
   type Achievement,
+  type AchievementCollectionItem,
+  type AchievementRarity,
   type BossProgressResult,
   type DashboardSummary,
   type Difficulty,
   type HunterGoal,
+  type ProgressDay,
+  type ProgressHistory,
   type Quest,
   type QuestCategory,
   type QuestCompletionResult,
@@ -18,6 +22,7 @@ import {
   type StatKey,
   type UserSettings,
   type UserStats,
+  type WeeklyRecap,
   type WeeklyBoss
 } from "@system-hunter/shared";
 import { supabase } from "./db.js";
@@ -36,14 +41,119 @@ const DAILY_GENERATED_QUEST_LIMIT = 3;
 let timezoneColumnsAvailable: boolean | null = null;
 let userSettingsTableAvailable: boolean | null = null;
 
-const ACHIEVEMENTS: Record<string, { title: string; description: string }> = {
-  first_quest: { title: "Первый квест", description: "Выполни первый ежедневный квест." },
-  streak_3: { title: "Серия 3 дня", description: "Выполняй квесты три дня подряд." },
-  streak_7: { title: "Серия 7 дней", description: "Выполняй квесты семь дней подряд." },
-  first_level_up: { title: "Первое повышение", description: "Получи новый уровень впервые." },
-  boss_slayer: { title: "Победитель босса", description: "Победи первого недельного босса." },
-  focus_hunter: { title: "Охотник фокуса", description: "Выполни 10 квестов фокуса." },
-  discipline_initiate: { title: "Адепт дисциплины", description: "Выполни 10 квестов дисциплины." }
+interface AchievementCatalogItem {
+  title: string;
+  description: string;
+  rarity: AchievementRarity;
+  target: number;
+  metric: keyof AchievementMetrics;
+}
+
+interface AchievementMetrics {
+  completedQuests: number;
+  streak: number;
+  level: number;
+  bossesDefeated: number;
+  focusCompleted: number;
+  disciplineCompleted: number;
+  strengthCompleted: number;
+  vitalityCompleted: number;
+  intelligenceCompleted: number;
+  charismaCompleted: number;
+}
+
+const ACHIEVEMENTS: Record<string, AchievementCatalogItem> = {
+  first_quest: {
+    title: "Первый квест",
+    description: "Выполни первый ежедневный квест.",
+    rarity: "common",
+    target: 1,
+    metric: "completedQuests"
+  },
+  streak_3: {
+    title: "Серия 3 дня",
+    description: "Выполняй квесты три дня подряд.",
+    rarity: "common",
+    target: 3,
+    metric: "streak"
+  },
+  streak_7: {
+    title: "Серия 7 дней",
+    description: "Выполняй квесты семь дней подряд.",
+    rarity: "rare",
+    target: 7,
+    metric: "streak"
+  },
+  streak_14: {
+    title: "Серия 14 дней",
+    description: "Удержи дисциплину две недели подряд.",
+    rarity: "epic",
+    target: 14,
+    metric: "streak"
+  },
+  streak_30: {
+    title: "Серия 30 дней",
+    description: "Закрой месяц без потери ежедневного ритма.",
+    rarity: "legendary",
+    target: 30,
+    metric: "streak"
+  },
+  first_level_up: {
+    title: "Первое повышение",
+    description: "Получи новый уровень впервые.",
+    rarity: "rare",
+    target: 2,
+    metric: "level"
+  },
+  boss_slayer: {
+    title: "Победитель босса",
+    description: "Победи первого недельного босса.",
+    rarity: "rare",
+    target: 1,
+    metric: "bossesDefeated"
+  },
+  focus_hunter: {
+    title: "Охотник фокуса",
+    description: "Выполни 10 квестов фокуса.",
+    rarity: "epic",
+    target: 10,
+    metric: "focusCompleted"
+  },
+  discipline_initiate: {
+    title: "Адепт дисциплины",
+    description: "Выполни 10 квестов дисциплины.",
+    rarity: "epic",
+    target: 10,
+    metric: "disciplineCompleted"
+  },
+  strength_path: {
+    title: "Путь силы",
+    description: "Выполни 10 квестов силы.",
+    rarity: "rare",
+    target: 10,
+    metric: "strengthCompleted"
+  },
+  vitality_path: {
+    title: "Путь восстановления",
+    description: "Выполни 10 квестов здоровья.",
+    rarity: "rare",
+    target: 10,
+    metric: "vitalityCompleted"
+  },
+  intelligence_path: {
+    title: "Путь разума",
+    description: "Выполни 10 квестов интеллекта.",
+    rarity: "rare",
+    target: 10,
+    metric: "intelligenceCompleted"
+  },
+  charisma_path: {
+    title: "Путь голоса",
+    description: "Выполни 10 квестов харизмы.",
+    rarity: "rare",
+    target: 10,
+    metric: "charismaCompleted"
+  }
 };
 
 const USER_COLUMNS =
@@ -347,6 +457,89 @@ export class HunterService {
 
     if (error) throw badRequest("Unable to load achievements", error);
     return (data ?? []).map(toAchievement);
+  }
+
+  async getProgressHistory(userId: string): Promise<ProgressHistory> {
+    const { today, startsAt, endsAt } = await this.getDateContext(userId);
+    const since = addDaysToDateString(today, -29);
+    const [historyResponse, recentResponse, achievementCollection] = await Promise.all([
+      supabase
+        .from("quests")
+        .select(QUEST_COLUMNS)
+        .eq("user_id", userId)
+        .gte("due_date", since)
+        .lte("due_date", today)
+        .order("due_date", { ascending: true }),
+      supabase
+        .from("quests")
+        .select(QUEST_COLUMNS)
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(20),
+      this.getAchievementCollection(userId)
+    ]);
+
+    if (historyResponse.error) throw badRequest("Unable to load progress history", historyResponse.error);
+    if (recentResponse.error) throw badRequest("Unable to load recent quests", recentResponse.error);
+
+    const historyQuests = (historyResponse.data ?? []).map(toQuest);
+    const recentQuests = (recentResponse.data ?? []).map(toQuest);
+    const weeklyQuests = historyQuests.filter((quest) => quest.dueDate >= startsAt && quest.dueDate <= endsAt);
+
+    return {
+      calendar: buildProgressCalendar(historyQuests, since, today),
+      recentQuests,
+      weeklyRecap: buildWeeklyRecap(weeklyQuests, startsAt, endsAt),
+      achievementCollection
+    };
+  }
+
+  private async getAchievementCollection(userId: string): Promise<AchievementCollectionItem[]> {
+    const [unlockedAchievements, metrics] = await Promise.all([
+      this.getAchievements(userId),
+      this.getAchievementMetrics(userId)
+    ]);
+    const unlockedByKey = new Map(unlockedAchievements.map((achievement) => [achievement.key, achievement]));
+
+    return Object.entries(ACHIEVEMENTS).map(([key, catalog]) => {
+      const achievement = unlockedByKey.get(key);
+      const rawProgress = Number(metrics[catalog.metric] ?? 0);
+      return {
+        key,
+        title: catalog.title,
+        description: catalog.description,
+        rarity: catalog.rarity,
+        unlocked: Boolean(achievement),
+        unlockedAt: achievement?.unlockedAt ?? null,
+        progress: Math.min(catalog.target, rawProgress),
+        target: catalog.target
+      };
+    });
+  }
+
+  private async getAchievementMetrics(userId: string): Promise<AchievementMetrics> {
+    const [user, bossesDefeated, completedQuests, ...categoryCounts] = await Promise.all([
+      this.getUser(userId),
+      this.countCompletedBosses(userId),
+      this.countCompletedQuests(userId),
+      ...STAT_KEYS.map((category) => this.countCompletedQuests(userId, category))
+    ]);
+    const byCategory = Object.fromEntries(
+      STAT_KEYS.map((category, index) => [category, categoryCounts[index] ?? 0])
+    ) as Record<StatKey, number>;
+
+    return {
+      completedQuests,
+      streak: user.streak,
+      level: user.level,
+      bossesDefeated,
+      focusCompleted: byCategory.focus,
+      disciplineCompleted: byCategory.discipline,
+      strengthCompleted: byCategory.strength,
+      vitalityCompleted: byCategory.vitality,
+      intelligenceCompleted: byCategory.intelligence,
+      charismaCompleted: byCategory.charisma
+    };
   }
 
   private async createOrUpdateUser(input: TelegramUserInput) {
@@ -910,22 +1103,13 @@ export class HunterService {
   }
 
   private async evaluateAchievements(userId: string, event: { leveledUp?: boolean; bossDefeated?: boolean } = {}) {
-    const [completed, focusCompleted, disciplineCompleted, bossesDefeated, user] = await Promise.all([
-      this.countCompletedQuests(userId),
-      this.countCompletedQuests(userId, "focus"),
-      this.countCompletedQuests(userId, "discipline"),
-      this.countCompletedBosses(userId),
-      this.getUser(userId)
-    ]);
-    const keys: string[] = [];
+    const metrics = await this.getAchievementMetrics(userId);
+    const keys = Object.entries(ACHIEVEMENTS)
+      .filter(([, catalog]) => Number(metrics[catalog.metric] ?? 0) >= catalog.target)
+      .map(([key]) => key);
 
-    if (completed >= 1) keys.push("first_quest");
-    if (user.streak >= 3) keys.push("streak_3");
-    if (user.streak >= 7) keys.push("streak_7");
     if (event.leveledUp) keys.push("first_level_up");
-    if (event.bossDefeated || bossesDefeated >= 1) keys.push("boss_slayer");
-    if (focusCompleted >= 10) keys.push("focus_hunter");
-    if (disciplineCompleted >= 10) keys.push("discipline_initiate");
+    if (event.bossDefeated) keys.push("boss_slayer");
 
     return this.unlockAchievements(userId, keys);
   }
@@ -1118,4 +1302,84 @@ function difficultyScore(actual: Difficulty, desired: Difficulty) {
 
 function sumRewards(rows: any[] | null) {
   return (rows ?? []).reduce((total, row) => total + Number(row.xp_reward ?? 0), 0);
+}
+
+function buildProgressCalendar(quests: Quest[], since: string, today: string): ProgressDay[] {
+  const days = new Map<string, ProgressDay>();
+  let cursor = since;
+
+  for (let index = 0; index < 30 && cursor <= today; index += 1) {
+    days.set(cursor, {
+      date: cursor,
+      total: 0,
+      completed: 0,
+      skipped: 0,
+      replaced: 0,
+      xp: 0
+    });
+    cursor = addDaysToDateString(cursor, 1);
+  }
+
+  for (const quest of quests) {
+    const day = days.get(quest.dueDate);
+    if (!day) continue;
+
+    day.total += 1;
+    if (quest.status === "completed") {
+      day.completed += 1;
+      day.xp += quest.xpReward;
+    }
+    if (quest.status === "skipped") day.skipped += 1;
+    if (quest.status === "replaced") day.replaced += 1;
+  }
+
+  return [...days.values()];
+}
+
+function buildWeeklyRecap(quests: Quest[], startsAt: string, endsAt: string): WeeklyRecap {
+  const completedByCategory = new Map<QuestCategory, number>();
+  const missedByCategory = new Map<QuestCategory, number>();
+  const recap: WeeklyRecap = {
+    startsAt,
+    endsAt,
+    completed: 0,
+    skipped: 0,
+    replaced: 0,
+    xp: 0,
+    strongestCategory: null,
+    weakestCategory: null
+  };
+
+  for (const quest of quests) {
+    if (quest.status === "completed") {
+      recap.completed += 1;
+      recap.xp += quest.xpReward;
+      completedByCategory.set(quest.category, (completedByCategory.get(quest.category) ?? 0) + 1);
+    }
+
+    if (quest.status === "skipped" || quest.status === "replaced") {
+      if (quest.status === "skipped") recap.skipped += 1;
+      if (quest.status === "replaced") recap.replaced += 1;
+      missedByCategory.set(quest.category, (missedByCategory.get(quest.category) ?? 0) + 1);
+    }
+  }
+
+  recap.strongestCategory = topCategory(completedByCategory);
+  recap.weakestCategory = topCategory(missedByCategory);
+  return recap;
+}
+
+function topCategory(counts: Map<QuestCategory, number>) {
+  let winner: QuestCategory | null = null;
+  let highest = 0;
+
+  for (const category of STAT_KEYS) {
+    const count = counts.get(category) ?? 0;
+    if (count > highest) {
+      highest = count;
+      winner = category;
+    }
+  }
+
+  return winner;
 }
