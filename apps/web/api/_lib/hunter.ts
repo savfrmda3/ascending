@@ -29,6 +29,7 @@ interface TelegramUserInput {
 }
 
 const DAILY_GENERATED_QUEST_LIMIT = 3;
+let timezoneColumnsAvailable: boolean | null = null;
 
 const ACHIEVEMENTS: Record<string, { title: string; description: string }> = {
   first_quest: { title: "Первый квест", description: "Выполни первый ежедневный квест." },
@@ -41,7 +42,7 @@ const ACHIEVEMENTS: Record<string, { title: string; description: string }> = {
 };
 
 const USER_COLUMNS =
-  "id,telegram_id,username,first_name,level,xp,rank,streak,hp,energy,timezone,timezone_offset,current_title,created_at,updated_at";
+  "id,telegram_id,username,first_name,level,xp,rank,streak,hp,energy,current_title,created_at,updated_at";
 const USER_STATS_COLUMNS =
   "id,user_id,strength,intelligence,vitality,discipline,focus,charisma,created_at,updated_at";
 const QUEST_COLUMNS =
@@ -74,6 +75,7 @@ export class HunterService {
 
   async getProfileBundle(userId: string) {
     const user = await this.getUser(userId);
+    const timezone = await this.getUserTimezone(userId);
     const stats = toStats(await this.ensureStats(userId));
     const [totalXp, completedQuestsCount] = await Promise.all([
       this.totalXp(userId),
@@ -93,8 +95,8 @@ export class HunterService {
         streak: user.streak,
         hp: user.hp,
         energy: user.energy,
-        timezone: user.timezone,
-        timezoneOffset: user.timezone_offset,
+        timezone: timezone.timezone,
+        timezoneOffset: timezone.timezone_offset,
         className: classForStats(stats),
         currentTitle: user.current_title,
         totalXp,
@@ -285,8 +287,6 @@ export class HunterService {
         .update({
           username: input.username ?? existing.username,
           first_name: input.firstName ?? existing.first_name,
-          timezone: input.timezone ?? existing.timezone,
-          timezone_offset: normalizeTimezoneOffset(input.timezoneOffset) ?? existing.timezone_offset,
           updated_at: new Date().toISOString()
         })
         .eq("id", existing.id)
@@ -294,6 +294,7 @@ export class HunterService {
         .single();
 
       if (error || !data) throw badRequest("Unable to update user", error);
+      await this.saveUserTimezone(existing.id, input);
       return data;
     }
 
@@ -303,14 +304,13 @@ export class HunterService {
         telegram_id: input.telegramId,
         username: input.username ?? null,
         first_name: input.firstName ?? null,
-        timezone: input.timezone ?? null,
-        timezone_offset: normalizeTimezoneOffset(input.timezoneOffset),
         rank: rankForLevel(1)
       })
       .select(USER_COLUMNS)
       .single();
 
     if (error || !data) throw badRequest("Unable to create user", error);
+    await this.saveUserTimezone(data.id, input);
     return data;
   }
 
@@ -556,14 +556,64 @@ export class HunterService {
   }
 
   private async getDateContext(userId: string) {
-    const user = await this.getUser(userId);
-    const timezoneOffset = normalizeTimezoneOffset(user.timezone_offset);
+    const timezone = await this.getUserTimezone(userId);
+    const timezoneOffset = normalizeTimezoneOffset(timezone.timezone_offset);
 
     return {
       timezoneOffset,
       today: todayDateString(new Date(), timezoneOffset),
       ...getWeekRange(new Date(), timezoneOffset)
     };
+  }
+
+  private async getUserTimezone(userId: string): Promise<{ timezone: string | null; timezone_offset: number | null }> {
+    if (timezoneColumnsAvailable === false) return { timezone: null, timezone_offset: null };
+
+    const { data, error } = await supabase
+      .from("users")
+      .select("timezone,timezone_offset")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingTimezoneColumn(error)) {
+        timezoneColumnsAvailable = false;
+        return { timezone: null, timezone_offset: null };
+      }
+      throw badRequest("Unable to load user timezone", error);
+    }
+
+    timezoneColumnsAvailable = true;
+    return {
+      timezone: data?.timezone ?? null,
+      timezone_offset: normalizeTimezoneOffset(data?.timezone_offset) ?? null
+    };
+  }
+
+  private async saveUserTimezone(userId: string, input: TelegramUserInput) {
+    const timezoneOffset = normalizeTimezoneOffset(input.timezoneOffset);
+    const timezone = input.timezone ?? null;
+
+    if (timezoneColumnsAvailable === false || (!timezone && timezoneOffset === null)) return;
+
+    const { error } = await supabase
+      .from("users")
+      .update({
+        ...(timezone ? { timezone } : {}),
+        ...(timezoneOffset !== null ? { timezone_offset: timezoneOffset } : {}),
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", userId);
+
+    if (error) {
+      if (isMissingTimezoneColumn(error)) {
+        timezoneColumnsAvailable = false;
+        return;
+      }
+      throw badRequest("Unable to update user timezone", error);
+    }
+
+    timezoneColumnsAvailable = true;
   }
 
   private async getQuestTemplates() {
@@ -829,6 +879,16 @@ function uniqueTemplates(templates: QuestTemplate[]) {
 
 function questTemplateKey(title: string, category: string) {
   return `${category.trim().toLowerCase()}::${title.trim().toLowerCase()}`;
+}
+
+function isMissingTimezoneColumn(error: unknown) {
+  const record = error as { code?: string; message?: string };
+  return (
+    record.code === "42703" ||
+    record.code === "PGRST204" ||
+    String(record.message ?? "").includes("users.timezone") ||
+    String(record.message ?? "").includes("timezone_offset")
+  );
 }
 
 function sumRewards(rows: any[] | null) {

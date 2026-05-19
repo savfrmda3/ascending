@@ -36,6 +36,7 @@ interface TelegramUserInput {
 }
 
 const DAILY_GENERATED_QUEST_LIMIT = 3;
+let timezoneColumnsAvailable: boolean | null = null;
 
 const ACHIEVEMENTS: Record<string, { title: string; description: string }> = {
   first_quest: {
@@ -350,8 +351,6 @@ export class HunterService {
         .update({
           username: input.username ?? existing.username,
           first_name: input.firstName ?? existing.first_name,
-          timezone: input.timezone ?? existing.timezone,
-          timezone_offset: normalizeTimezoneOffset(input.timezoneOffset) ?? existing.timezone_offset,
           updated_at: new Date().toISOString()
         })
         .eq("id", existing.id)
@@ -359,6 +358,7 @@ export class HunterService {
         .single();
 
       if (error || !data) throw badRequest("Unable to update user", error);
+      await this.saveUserTimezone(existing.id, input);
       return data as UserRow;
     }
 
@@ -368,14 +368,13 @@ export class HunterService {
         telegram_id: input.telegramId,
         username: input.username ?? null,
         first_name: input.firstName ?? null,
-        timezone: input.timezone ?? null,
-        timezone_offset: normalizeTimezoneOffset(input.timezoneOffset),
         rank: rankForLevel(1)
       })
       .select("*")
       .single();
 
     if (error || !data) throw badRequest("Unable to create user", error);
+    await this.saveUserTimezone((data as UserRow).id, input);
     return data as UserRow;
   }
 
@@ -633,6 +632,32 @@ export class HunterService {
     };
   }
 
+  private async saveUserTimezone(userId: string, input: TelegramUserInput) {
+    const timezoneOffset = normalizeTimezoneOffset(input.timezoneOffset);
+    const timezone = input.timezone ?? null;
+
+    if (timezoneColumnsAvailable === false || (!timezone && timezoneOffset === null)) return;
+
+    const { error } = await supabase
+      .from("users")
+      .update({
+        ...(timezone ? { timezone } : {}),
+        ...(timezoneOffset !== null ? { timezone_offset: timezoneOffset } : {}),
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", userId);
+
+    if (error) {
+      if (isMissingTimezoneColumn(error)) {
+        timezoneColumnsAvailable = false;
+        return;
+      }
+      throw badRequest("Unable to update user timezone", error);
+    }
+
+    timezoneColumnsAvailable = true;
+  }
+
   private async getQuestTemplates(): Promise<QuestTemplate[]> {
     const { data, error } = await supabase
       .from("quest_templates")
@@ -868,4 +893,14 @@ function uniqueTemplates(templates: QuestTemplate[]) {
 
 function questTemplateKey(title: string, category: string) {
   return `${category.trim().toLowerCase()}::${title.trim().toLowerCase()}`;
+}
+
+function isMissingTimezoneColumn(error: unknown) {
+  const record = error as { code?: string; message?: string };
+  return (
+    record.code === "42703" ||
+    record.code === "PGRST204" ||
+    String(record.message ?? "").includes("users.timezone") ||
+    String(record.message ?? "").includes("timezone_offset")
+  );
 }
