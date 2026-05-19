@@ -205,6 +205,25 @@ function formatRuDate(value: string) {
   return new Date(value).toLocaleDateString("ru-RU");
 }
 
+function isDemoPreviewRequested() {
+  const url = new URL(window.location.href);
+  const mode = url.searchParams.get("mode")?.toLowerCase();
+  const preview = url.searchParams.get("preview")?.toLowerCase();
+  const demo = url.searchParams.get("demo")?.toLowerCase();
+
+  return (
+    import.meta.env.DEV ||
+    url.pathname === "/preview" ||
+    url.pathname === "/demo" ||
+    mode === "demo" ||
+    preview === "1" ||
+    preview === "true" ||
+    preview === "chatgpt" ||
+    demo === "1" ||
+    demo === "true"
+  );
+}
+
 export function App() {
   const [view, setView] = useState<View>("dashboard");
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
@@ -219,7 +238,7 @@ export function App() {
       try {
         const initData = window.Telegram?.WebApp?.initData;
         if (!initData) {
-          if (import.meta.env.DEV) {
+          if (isDemoPreviewRequested()) {
             setDemoMode(true);
             setDashboard(demoDashboard);
             return;
@@ -590,7 +609,7 @@ function DashboardView({
           <div>
             <p className="font-mono text-sm font-bold text-system-text">СИСТЕМНОЕ УВЕДОМЛЕНИЕ</p>
             <p className="mt-1 text-sm text-system-muted">
-              {demoMode ? "Активен режим предпросмотра. В продакшене потребуется авторизация Telegram." : "Дневной протокол синхронизирован."}
+              {demoMode ? "Активен демо-доступ для внешнего просмотра. Реальные данные не используются." : "Дневной протокол синхронизирован."}
             </p>
           </div>
         </div>
