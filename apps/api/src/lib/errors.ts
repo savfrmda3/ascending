@@ -30,6 +30,10 @@ export function unauthorized(message = "Unauthorized") {
   return new AppError(401, "UNAUTHORIZED", message);
 }
 
+export function tooManyRequests(message = "Too many requests") {
+  return new AppError(429, "RATE_LIMITED", message);
+}
+
 export function asyncHandler<T extends Request>(
   handler: (req: T, res: Response, next: NextFunction) => Promise<unknown>
 ) {
@@ -39,6 +43,15 @@ export function asyncHandler<T extends Request>(
 }
 
 export function errorHandler(error: unknown, _req: Request, res: Response, _next: NextFunction) {
+  if (isBodyParserError(error)) {
+    return res.status(error.status).json({
+      error: {
+        code: error.status === 413 ? "PAYLOAD_TOO_LARGE" : "BAD_REQUEST",
+        message: error.status === 413 ? "Request body is too large" : "Invalid JSON body"
+      }
+    });
+  }
+
   if (error instanceof ZodError) {
     return res.status(400).json({
       error: {
@@ -66,4 +79,10 @@ export function errorHandler(error: unknown, _req: Request, res: Response, _next
       message: "Unexpected server error"
     }
   });
+}
+
+function isBodyParserError(error: unknown): error is { status: number; type?: string } {
+  if (!error || typeof error !== "object") return false;
+  const status = (error as { status?: unknown }).status;
+  return status === 400 || status === 413;
 }

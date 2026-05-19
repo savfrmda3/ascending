@@ -43,6 +43,14 @@ export function conflict(message: string) {
   return new ApiError(409, "CONFLICT", message);
 }
 
+export function payloadTooLarge(message = "Request body is too large") {
+  return new ApiError(413, "PAYLOAD_TOO_LARGE", message);
+}
+
+export function tooManyRequests(message = "Too many requests") {
+  return new ApiError(429, "RATE_LIMITED", message);
+}
+
 export function sendData(res: ApiResponse, data: unknown, status = 200) {
   res.status(status).json({ data });
 }
@@ -80,21 +88,43 @@ export function sendError(res: ApiResponse, error: unknown) {
 }
 
 export async function readBody<T = unknown>(req: ApiRequest): Promise<T> {
+  const maxBytes = 64 * 1024;
   if (req.body) {
-    return typeof req.body === "string" ? (JSON.parse(req.body) as T) : (req.body as T);
+    if (typeof req.body === "string") {
+      if (Buffer.byteLength(req.body, "utf8") > maxBytes) throw payloadTooLarge();
+      try {
+        return JSON.parse(req.body) as T;
+      } catch (error) {
+        throw badRequest("Invalid JSON body", error);
+      }
+    }
+    return req.body as T;
   }
 
   if (!req.on) return {} as T;
 
   const chunks: Buffer[] = [];
+  let size = 0;
   await new Promise<void>((resolve, reject) => {
-    req.on?.("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on?.("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(payloadTooLarge());
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on?.("end", () => resolve());
     req.on?.("error", reject);
   });
 
   const raw = Buffer.concat(chunks).toString("utf8");
-  return raw ? (JSON.parse(raw) as T) : ({} as T);
+  if (!raw) return {} as T;
+  try {
+    return JSON.parse(raw) as T;
+  } catch (error) {
+    throw badRequest("Invalid JSON body", error);
+  }
 }
 
 export function getBearerToken(req: ApiRequest) {

@@ -7,22 +7,28 @@ import {
   rankForLevel,
   xpToNextLevel,
   type Achievement,
+  type BossProgressResult,
   type DashboardSummary,
   type Quest,
   type QuestCompletionResult,
+  type QuestTemplate,
   type StatKey,
   type UserStats,
   type WeeklyBoss
 } from "@system-hunter/shared";
 import { supabase } from "./db.js";
-import { addDays, getWeekRange, todayDateString } from "./dates.js";
+import { addDaysToDateString, getWeekRange, normalizeTimezoneOffset, todayDateString } from "./dates.js";
 import { badRequest, conflict, notFound } from "./http.js";
 
 interface TelegramUserInput {
   telegramId: number;
   username?: string | null;
   firstName?: string | null;
+  timezone?: string | null;
+  timezoneOffset?: number | null;
 }
+
+const DAILY_GENERATED_QUEST_LIMIT = 3;
 
 const ACHIEVEMENTS: Record<string, { title: string; description: string }> = {
   first_quest: { title: "Первый квест", description: "Выполни первый ежедневный квест." },
@@ -35,7 +41,7 @@ const ACHIEVEMENTS: Record<string, { title: string; description: string }> = {
 };
 
 const USER_COLUMNS =
-  "id,telegram_id,username,first_name,level,xp,rank,streak,hp,energy,current_title,created_at,updated_at";
+  "id,telegram_id,username,first_name,level,xp,rank,streak,hp,energy,timezone,timezone_offset,current_title,created_at,updated_at";
 const USER_STATS_COLUMNS =
   "id,user_id,strength,intelligence,vitality,discipline,focus,charisma,created_at,updated_at";
 const QUEST_COLUMNS =
@@ -87,6 +93,8 @@ export class HunterService {
         streak: user.streak,
         hp: user.hp,
         energy: user.energy,
+        timezone: user.timezone,
+        timezoneOffset: user.timezone_offset,
         className: classForStats(stats),
         currentTitle: user.current_title,
         totalXp,
@@ -105,11 +113,12 @@ export class HunterService {
 
   async getTodayQuests(userId: string) {
     await this.ensureDailyQuests(userId);
+    const { today } = await this.getDateContext(userId);
     const { data, error } = await supabase
       .from("quests")
       .select(QUEST_COLUMNS)
       .eq("user_id", userId)
-      .eq("due_date", todayDateString())
+      .eq("due_date", today)
       .order("created_at", { ascending: true });
 
     if (error) throw badRequest("Unable to load today's quests", error);
@@ -122,28 +131,7 @@ export class HunterService {
   }
 
   async generateQuest(userId: string) {
-    const template = pickRandom(await this.getQuestTemplates(), 1)[0];
-    if (!template) throw badRequest("No quest templates are available");
-
-    const { data, error } = await supabase
-      .from("quests")
-      .insert({
-        user_id: userId,
-        title: template.title,
-        description: template.description,
-        type: "generated",
-        category: template.category,
-        difficulty: template.difficulty,
-        xp_reward: template.xpReward,
-        stat_reward_key: template.statRewardKey,
-        stat_reward_value: template.statRewardValue,
-        due_date: todayDateString()
-      })
-      .select(QUEST_COLUMNS)
-      .single();
-
-    if (error || !data) throw badRequest("Unable to generate quest", error);
-    return toQuest(data);
+    return this.createGeneratedQuest(userId);
   }
 
   async generateQuestByTelegramId(telegramId: number) {
@@ -151,26 +139,51 @@ export class HunterService {
     return this.generateQuest(user.id);
   }
 
+  async replaceQuest(userId: string, questId: string) {
+    const quest = await this.getQuest(userId, questId);
+    if (quest.status !== "active") throw conflict("Only active quests can be replaced");
+
+    const prepared = await this.prepareGeneratedQuest(userId);
+    const { data: replaced, error: replaceError } = await supabase
+      .from("quests")
+      .update({ status: "replaced" })
+      .eq("id", questId)
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .select(QUEST_COLUMNS)
+      .maybeSingle();
+
+    if (replaceError) throw badRequest("Unable to replace quest", replaceError);
+    if (!replaced) throw conflict("Quest is not active");
+
+    return this.insertGeneratedQuest(userId, prepared.template, prepared.today);
+  }
+
   async completeQuest(userId: string, questId: string): Promise<QuestCompletionResult> {
     const quest = await this.getQuest(userId, questId);
-    if (quest.status === "completed") throw conflict("Quest is already completed");
-    if (quest.status === "skipped") throw conflict("Skipped quest cannot be completed");
+    if (quest.status !== "active") throw conflict("Quest is not active");
 
     const { data, error } = await supabase
       .from("quests")
       .update({ status: "completed", completed_at: new Date().toISOString() })
       .eq("id", questId)
       .eq("user_id", userId)
+      .eq("status", "active")
       .select(QUEST_COLUMNS)
-      .single();
+      .maybeSingle();
 
-    if (error || !data) throw badRequest("Unable to complete quest", error);
+    if (error) throw badRequest("Unable to complete quest", error);
+    if (!data) throw conflict("Quest is not active");
 
     const levelUp = await this.award(userId, quest.xp_reward, quest.stat_reward_key, quest.stat_reward_value);
     const streak = await this.calculateStreak(userId);
     await supabase.from("users").update({ streak, updated_at: new Date().toISOString() }).eq("id", userId);
 
-    const unlockedAchievements = await this.evaluateAchievements(userId, { leveledUp: levelUp.leveledUp });
+    const bossProgress = await this.syncBossProgress(userId);
+    const unlockedAchievements = [
+      ...(await this.evaluateAchievements(userId, { leveledUp: levelUp.leveledUp })),
+      ...(bossProgress?.unlockedAchievements ?? [])
+    ];
     const { profile, stats } = await this.getProfileBundle(userId);
 
     return {
@@ -187,6 +200,7 @@ export class HunterService {
         from: levelUp.from,
         to: levelUp.to
       },
+      bossProgress,
       unlockedAchievements
     };
   }
@@ -205,16 +219,18 @@ export class HunterService {
       .update({ status: "skipped" })
       .eq("id", questId)
       .eq("user_id", userId)
+      .eq("status", "active")
       .select(QUEST_COLUMNS)
-      .single();
+      .maybeSingle();
 
-    if (error || !data) throw badRequest("Unable to skip quest", error);
+    if (error) throw badRequest("Unable to skip quest", error);
+    if (!data) throw conflict("Quest is not active");
     return toQuest(data);
   }
 
   async getCurrentBoss(userId: string) {
     await this.ensureWeeklyBoss(userId);
-    const { startsAt, endsAt } = getWeekRange();
+    const { startsAt, endsAt } = await this.getDateContext(userId);
     const { data, error } = await supabase
       .from("weekly_bosses")
       .select(BOSS_COLUMNS)
@@ -226,7 +242,9 @@ export class HunterService {
       .maybeSingle();
 
     if (error) throw badRequest("Unable to load weekly boss", error);
-    return data ? toBoss(data) : null;
+    if (!data) return null;
+    const synced = await this.syncBossProgress(userId, toBoss(data));
+    return synced?.boss ?? toBoss(data);
   }
 
   async getCurrentBossByTelegramId(telegramId: number) {
@@ -236,32 +254,11 @@ export class HunterService {
 
   async progressBoss(userId: string, bossId: string) {
     const boss = await this.getBoss(userId, bossId);
-    if (boss.status === "completed") throw conflict("Weekly boss is already completed");
+    if (boss.status === "expired") throw conflict("Weekly boss has expired");
 
-    const progress = Math.min(boss.progress + 1, boss.target);
-    const victory = progress >= boss.target;
-    const { data, error } = await supabase
-      .from("weekly_bosses")
-      .update({
-        progress,
-        status: victory ? "completed" : "active",
-        completed_at: victory ? new Date().toISOString() : null
-      })
-      .eq("id", bossId)
-      .eq("user_id", userId)
-      .select(BOSS_COLUMNS)
-      .single();
-
-    if (error || !data) throw badRequest("Unable to update boss progress", error);
-
-    let unlockedAchievements: Achievement[] = [];
-    if (victory) {
-      await this.award(userId, boss.xp_reward, boss.stat_reward_key, boss.stat_reward_value, "Охотник фокуса");
-      unlockedAchievements = await this.evaluateAchievements(userId, { bossDefeated: true });
-    }
-
-    const { profile, stats } = await this.getProfileBundle(userId);
-    return { boss: toBoss(data), profile, stats, victory, unlockedAchievements };
+    const result = await this.syncBossProgress(userId, boss);
+    if (!result) throw notFound("Weekly boss not found");
+    return result;
   }
 
   async progressBossByTelegramId(telegramId: number, bossId: string) {
@@ -288,6 +285,8 @@ export class HunterService {
         .update({
           username: input.username ?? existing.username,
           first_name: input.firstName ?? existing.first_name,
+          timezone: input.timezone ?? existing.timezone,
+          timezone_offset: normalizeTimezoneOffset(input.timezoneOffset) ?? existing.timezone_offset,
           updated_at: new Date().toISOString()
         })
         .eq("id", existing.id)
@@ -304,6 +303,8 @@ export class HunterService {
         telegram_id: input.telegramId,
         username: input.username ?? null,
         first_name: input.firstName ?? null,
+        timezone: input.timezone ?? null,
+        timezone_offset: normalizeTimezoneOffset(input.timezoneOffset),
         rank: rankForLevel(1)
       })
       .select(USER_COLUMNS)
@@ -358,17 +359,18 @@ export class HunterService {
   }
 
   private async ensureDailyQuests(userId: string) {
+    const { today } = await this.getDateContext(userId);
     const { data, error } = await supabase
       .from("quests")
       .select("id")
       .eq("user_id", userId)
-      .eq("due_date", todayDateString())
+      .eq("due_date", today)
       .limit(1);
 
     if (error) throw badRequest("Unable to inspect quests", error);
     if ((data ?? []).length > 0) return;
 
-    const rows = pickRandom(await this.getQuestTemplates(), 5).map((template) => ({
+    const rows = pickRandom(uniqueTemplates(await this.getQuestTemplates()), 5).map((template) => ({
       user_id: userId,
       title: template.title,
       description: template.description,
@@ -378,7 +380,7 @@ export class HunterService {
       xp_reward: template.xpReward,
       stat_reward_key: template.statRewardKey,
       stat_reward_value: template.statRewardValue,
-      due_date: todayDateString()
+      due_date: today
     }));
 
     if (rows.length === 0) throw badRequest("No quest templates are available");
@@ -387,7 +389,7 @@ export class HunterService {
   }
 
   private async ensureWeeklyBoss(userId: string) {
-    const { startsAt, endsAt } = getWeekRange();
+    const { startsAt, endsAt } = await this.getDateContext(userId);
     const { data, error } = await supabase
       .from("weekly_bosses")
       .select("id")
@@ -413,6 +415,155 @@ export class HunterService {
     });
 
     if (insertError) throw badRequest("Unable to create weekly boss", insertError);
+  }
+
+  private async prepareGeneratedQuest(userId: string) {
+    const { today } = await this.getDateContext(userId);
+    const todayQuests = await this.getQuestsForDate(userId, today);
+    const generatedCount = todayQuests.filter((quest) => quest.type === "generated").length;
+
+    if (generatedCount >= DAILY_GENERATED_QUEST_LIMIT) {
+      throw conflict("Daily generated quest limit reached");
+    }
+
+    const existingKeys = new Set(todayQuests.map((quest) => questTemplateKey(quest.title, quest.category)));
+    const candidates = uniqueTemplates(await this.getQuestTemplates()).filter(
+      (template) => !existingKeys.has(questTemplateKey(template.title, template.category))
+    );
+    const template = pickRandom(candidates, 1)[0];
+
+    if (!template) throw conflict("No unique quest templates available today");
+    return { template, today };
+  }
+
+  private async createGeneratedQuest(userId: string) {
+    const prepared = await this.prepareGeneratedQuest(userId);
+    return this.insertGeneratedQuest(userId, prepared.template, prepared.today);
+  }
+
+  private async insertGeneratedQuest(userId: string, template: QuestTemplate, today: string) {
+    const { data, error } = await supabase
+      .from("quests")
+      .insert({
+        user_id: userId,
+        title: template.title,
+        description: template.description,
+        type: "generated",
+        category: template.category,
+        difficulty: template.difficulty,
+        xp_reward: template.xpReward,
+        stat_reward_key: template.statRewardKey,
+        stat_reward_value: template.statRewardValue,
+        due_date: today
+      })
+      .select(QUEST_COLUMNS)
+      .single();
+
+    if (error?.code === "23505") throw conflict("Quest already exists today");
+    if (error || !data) throw badRequest("Unable to generate quest", error);
+    return toQuest(data);
+  }
+
+  private async getQuestsForDate(userId: string, date: string) {
+    const { data, error } = await supabase
+      .from("quests")
+      .select(QUEST_COLUMNS)
+      .eq("user_id", userId)
+      .eq("due_date", date);
+
+    if (error) throw badRequest("Unable to inspect quests", error);
+    return data ?? [];
+  }
+
+  private async syncBossProgress(userId: string, boss?: WeeklyBoss | null): Promise<BossProgressResult | null> {
+    const currentBoss = boss ?? await this.getUnsyncedCurrentBoss(userId);
+    if (!currentBoss) return null;
+
+    if (currentBoss.status !== "active") {
+      const { profile, stats } = await this.getProfileBundle(userId);
+      return { boss: currentBoss, profile, stats, victory: false, progressed: false, unlockedAchievements: [] };
+    }
+
+    const { count, error } = await supabase
+      .from("quests")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("category", "focus")
+      .eq("status", "completed")
+      .gte("due_date", currentBoss.startsAt)
+      .lte("due_date", currentBoss.endsAt);
+
+    if (error) throw badRequest("Unable to inspect boss objective", error);
+
+    const progress = Math.min(count ?? 0, currentBoss.target);
+    const progressed = progress > currentBoss.progress;
+    const victory = progress >= currentBoss.target;
+    let updatedBoss = currentBoss;
+    let unlockedAchievements: Achievement[] = [];
+
+    if (progress !== currentBoss.progress || victory) {
+      const { data, error: updateError } = await supabase
+        .from("weekly_bosses")
+        .update({
+          progress,
+          status: victory ? "completed" : "active",
+          completed_at: victory ? new Date().toISOString() : null
+        })
+        .eq("id", currentBoss.id)
+        .eq("user_id", userId)
+        .eq("status", "active")
+        .select(BOSS_COLUMNS)
+        .maybeSingle();
+
+      if (updateError) throw badRequest("Unable to update boss progress", updateError);
+      if (data) {
+        updatedBoss = toBoss(data);
+        if (victory) {
+          await this.award(userId, currentBoss.xpReward, currentBoss.statRewardKey, currentBoss.statRewardValue, "Охотник фокуса");
+          unlockedAchievements = await this.evaluateAchievements(userId, { bossDefeated: true });
+        }
+      } else {
+        updatedBoss = await this.getBoss(userId, currentBoss.id);
+      }
+    }
+
+    const { profile, stats } = await this.getProfileBundle(userId);
+    return {
+      boss: updatedBoss,
+      profile,
+      stats,
+      victory: victory && updatedBoss.status === "completed" && currentBoss.status === "active",
+      progressed,
+      unlockedAchievements
+    };
+  }
+
+  private async getUnsyncedCurrentBoss(userId: string) {
+    await this.ensureWeeklyBoss(userId);
+    const { startsAt, endsAt } = await this.getDateContext(userId);
+    const { data, error } = await supabase
+      .from("weekly_bosses")
+      .select(BOSS_COLUMNS)
+      .eq("user_id", userId)
+      .eq("starts_at", startsAt)
+      .eq("ends_at", endsAt)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw badRequest("Unable to load weekly boss", error);
+    return data ? toBoss(data) : null;
+  }
+
+  private async getDateContext(userId: string) {
+    const user = await this.getUser(userId);
+    const timezoneOffset = normalizeTimezoneOffset(user.timezone_offset);
+
+    return {
+      timezoneOffset,
+      today: todayDateString(new Date(), timezoneOffset),
+      ...getWeekRange(new Date(), timezoneOffset)
+    };
   }
 
   private async getQuestTemplates() {
@@ -453,7 +604,7 @@ export class HunterService {
 
     if (error) throw badRequest("Unable to load boss", error);
     if (!data) throw notFound("Weekly boss not found");
-    return data;
+    return toBoss(data);
   }
 
   private async award(userId: string, xpReward: number, statKey: StatKey, statReward: number, title?: string) {
@@ -520,6 +671,7 @@ export class HunterService {
   }
 
   private async calculateStreak(userId: string) {
+    const { timezoneOffset, today } = await this.getDateContext(userId);
     const { data, error } = await supabase
       .from("quests")
       .select("completed_at")
@@ -530,14 +682,16 @@ export class HunterService {
 
     if (error) throw badRequest("Unable to calculate streak", error);
     const completedDates = new Set(
-      (data ?? []).map((row: any) => row.completed_at?.slice(0, 10)).filter(Boolean)
+      (data ?? [])
+        .map((row: any) => row.completed_at ? todayDateString(new Date(row.completed_at), timezoneOffset) : null)
+        .filter(Boolean)
     );
 
     let streak = 0;
-    let cursor = new Date(`${todayDateString()}T00:00:00.000Z`);
-    while (completedDates.has(todayDateString(cursor))) {
+    let cursor = today;
+    while (completedDates.has(cursor)) {
       streak += 1;
-      cursor = addDays(cursor, -1);
+      cursor = addDaysToDateString(cursor, -1);
     }
 
     return streak;
@@ -661,6 +815,20 @@ function toAchievement(row: any): Achievement {
 
 function pickRandom<T>(items: T[], count: number) {
   return [...items].sort(() => Math.random() - 0.5).slice(0, count);
+}
+
+function uniqueTemplates(templates: QuestTemplate[]) {
+  const seen = new Set<string>();
+  return templates.filter((template) => {
+    const key = questTemplateKey(template.title, template.category);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function questTemplateKey(title: string, category: string) {
+  return `${category.trim().toLowerCase()}::${title.trim().toLowerCase()}`;
 }
 
 function sumRewards(rows: any[] | null) {

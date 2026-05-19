@@ -10,7 +10,7 @@ export type StatKey =
 
 export type QuestCategory = StatKey;
 export type Difficulty = "easy" | "medium" | "hard";
-export type QuestStatus = "active" | "completed" | "skipped";
+export type QuestStatus = "active" | "completed" | "skipped" | "replaced";
 export type BossStatus = "active" | "completed" | "expired";
 
 export interface HunterProfile {
@@ -25,6 +25,8 @@ export interface HunterProfile {
   streak: number;
   hp: number;
   energy: number;
+  timezone: string | null;
+  timezoneOffset: number | null;
   className: string;
   currentTitle: string | null;
   totalXp: number;
@@ -124,6 +126,7 @@ export interface QuestCompletionResult {
     from: number;
     to: number;
   };
+  bossProgress: BossProgressResult | null;
   unlockedAchievements: Achievement[];
 }
 
@@ -132,6 +135,7 @@ export interface BossProgressResult {
   profile: HunterProfile;
   stats: UserStats;
   victory: boolean;
+  progressed: boolean;
   unlockedAchievements: Achievement[];
 }
 

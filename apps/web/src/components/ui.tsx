@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 export function Panel({
@@ -41,7 +41,13 @@ export function ProgressBar({
             : "from-system-purple to-system-cyan";
 
   return (
-    <div className="hud-progress-track h-2.5 overflow-hidden bg-black/40 ring-1 ring-white/5">
+    <div
+      aria-valuemax={max}
+      aria-valuemin={0}
+      aria-valuenow={Math.min(max, Math.max(0, value))}
+      className="hud-progress-track h-2.5 overflow-hidden bg-black/40 ring-1 ring-white/5"
+      role="progressbar"
+    >
       <div
         className={`h-full bg-gradient-to-r ${colorClass} shadow-cyan transition-all duration-500`}
         style={{ width: `${width}%` }}
@@ -106,9 +112,22 @@ export function Modal({
   children: ReactNode;
   onClose: () => void;
 }) {
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-      <div className="hud-panel level-up w-full max-w-sm border border-system-cyan/50 bg-system-card p-5 shadow-cyan">
+      <div
+        aria-modal="true"
+        className="hud-panel level-up w-full max-w-sm border border-system-cyan/50 bg-system-card p-5 shadow-cyan"
+        role="dialog"
+      >
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-mono text-lg font-black uppercase text-system-text">{title}</h2>
           <button

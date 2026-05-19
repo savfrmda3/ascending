@@ -22,6 +22,8 @@ export interface UserRow {
   streak: number;
   hp: number;
   energy: number;
+  timezone: string | null;
+  timezone_offset: number | null;
   current_title: string | null;
   created_at: string;
   updated_at: string;
@@ -117,6 +119,8 @@ export function toProfile(
     streak: row.streak,
     hp: row.hp,
     energy: row.energy,
+    timezone: row.timezone,
+    timezoneOffset: row.timezone_offset,
     className: classForStats({
       strength: stats.strength,
       intelligence: stats.intelligence,

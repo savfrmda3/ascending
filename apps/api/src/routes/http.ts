@@ -28,7 +28,9 @@ router.post(
     const result = await hunterService.syncTelegramUser({
       telegramId: telegramUser.id,
       username: telegramUser.username ?? null,
-      firstName: telegramUser.first_name ?? null
+      firstName: telegramUser.first_name ?? null,
+      timezone: body.timezone ?? null,
+      timezoneOffset: body.timezoneOffset ?? null
     });
 
     const token = jwt.sign(
@@ -114,6 +116,16 @@ router.post(
     if (!req.auth) throw badRequest("Missing auth context");
     const params = uuidParamSchema.parse(req.params);
     res.json({ data: await hunterService.skipQuest(req.auth.userId, params.id) });
+  })
+);
+
+router.post(
+  "/api/quests/:id/replace",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw badRequest("Missing auth context");
+    const params = uuidParamSchema.parse(req.params);
+    res.status(201).json({ data: await hunterService.replaceQuest(req.auth.userId, params.id) });
   })
 );
 

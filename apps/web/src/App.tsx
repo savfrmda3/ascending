@@ -29,7 +29,7 @@ import {
   type StatKey
 } from "@system-hunter/shared";
 import { Modal, Panel, PrimaryButton, ProgressBar, Metric } from "./components/ui.js";
-import { authenticateTelegram, completeQuest, generateQuest, getDashboard, progressBoss } from "./lib/api.js";
+import { authenticateTelegram, completeQuest, generateQuest, getDashboard, replaceQuest, skipQuest } from "./lib/api.js";
 import { demoDashboard } from "./lib/demo.js";
 
 type View = "dashboard" | "quests" | "stats" | "boss" | "profile";
@@ -83,7 +83,8 @@ const DIFFICULTY_LABELS_RU: Record<Quest["difficulty"], string> = {
 const STATUS_LABELS_RU: Record<Quest["status"], string> = {
   active: "Активен",
   completed: "Выполнен",
-  skipped: "Пропущен"
+  skipped: "Пропущен",
+  replaced: "Заменен"
 };
 
 const CLASS_LABELS_RU: Record<string, string> = {
@@ -266,10 +267,53 @@ export function App() {
     }
   }
 
+  async function onSkipQuest(quest: Quest) {
+    setBusyId(quest.id);
+    try {
+      if (demoMode) {
+        markQuestInDemo(quest, "skipped");
+        setModal({ type: "notice", title: "КВЕСТ ПРОПУЩЕН", body: "В демо-режиме это действие не сохраняется." });
+        return;
+      }
+
+      await skipQuest(quest.id);
+      await refresh();
+      setModal({ type: "notice", title: "КВЕСТ ПРОПУЩЕН", body: "Квест снят с активного протокола. Награда не начислена." });
+    } catch (caught) {
+      setModal({ type: "notice", title: "ОШИБКА", body: caught instanceof Error ? caught.message : "Не удалось пропустить квест" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onReplaceQuest(quest: Quest) {
+    setBusyId(quest.id);
+    try {
+      if (demoMode) {
+        if (replaceQuestInDemo(quest)) {
+          setModal({ type: "notice", title: "КВЕСТ ЗАМЕНЕН", body: "Добавлен новый демо-квест. Данные не сохраняются." });
+        }
+        return;
+      }
+
+      await replaceQuest(quest.id);
+      await refresh();
+      setModal({ type: "notice", title: "КВЕСТ ЗАМЕНЕН", body: "Старый квест закрыт как замененный, новый добавлен без повтора." });
+    } catch (caught) {
+      setModal({ type: "notice", title: "ОШИБКА", body: caught instanceof Error ? caught.message : "Не удалось заменить квест" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function onGenerateQuest() {
     setBusyId("generate");
     try {
       if (demoMode) {
+        if (demoGeneratedCount(dashboard ?? demoDashboard) >= 3) {
+          setModal({ type: "notice", title: "ЛИМИТ ДОСТИГНУТ", body: "В демо-режиме можно создать не больше 3 дополнительных квестов на день." });
+          return;
+        }
         setDashboard((current) =>
           current
             ? {
@@ -298,28 +342,7 @@ export function App() {
       await refresh();
       setModal({ type: "notice", title: "КВЕСТ СОЗДАН", body: "Новый квест добавлен в дневной протокол." });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Не удалось создать квест");
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function onBossStep() {
-    if (!dashboard?.boss) return;
-    setBusyId(dashboard.boss.id);
-    try {
-      if (demoMode) {
-        const result = progressBossInDemo();
-        if (result) setModal(result.victory ? { type: "boss", result } : { type: "notice", title: "ПРОГРЕСС БОССА", body: "Шаг босса засчитан." });
-        return;
-      }
-
-      const result = await progressBoss(dashboard.boss.id);
-      setModal(result.victory ? { type: "boss", result } : { type: "notice", title: "ПРОГРЕСС БОССА", body: "Шаг босса засчитан." });
-      window.Telegram?.WebApp?.HapticFeedback?.impactOccurred("medium");
-      await refresh();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Не удалось обновить прогресс босса");
+      setModal({ type: "notice", title: "КВЕСТ НЕ СОЗДАН", body: caught instanceof Error ? caught.message : "Не удалось создать квест" });
     } finally {
       setBusyId(null);
     }
@@ -337,6 +360,7 @@ export function App() {
       status: "completed" as const,
       completedAt: new Date().toISOString()
     };
+    const bossProgress = progressBossFromDemoQuest(current, quest);
     const nextDashboard: DashboardSummary = {
       ...current,
       profile: {
@@ -348,7 +372,8 @@ export function App() {
         completedQuestsCount: current.profile.completedQuestsCount + 1
       },
       stats: updatedStats,
-      todayQuests: current.todayQuests.map((item) => (item.id === quest.id ? updatedQuest : item))
+      todayQuests: current.todayQuests.map((item) => (item.id === quest.id ? updatedQuest : item)),
+      boss: bossProgress?.boss ?? current.boss
     };
     setDashboard(nextDashboard);
 
@@ -366,12 +391,18 @@ export function App() {
         from: xpResult.from,
         to: xpResult.to
       },
+      bossProgress,
       unlockedAchievements: []
     };
   }
 
-  function progressBossInDemo(): BossProgressResult | null {
-    const current = dashboard ?? demoDashboard;
+  function progressBossFromDemoQuest(current: DashboardSummary, quest: Quest): BossProgressResult | null {
+    if (quest.category !== "focus") return null;
+    if (!current.boss || current.boss.status !== "active") return null;
+    return progressBossInDemo(current);
+  }
+
+  function progressBossInDemo(current: DashboardSummary): BossProgressResult | null {
     if (!current.boss) return null;
     const nextProgress = Math.min(current.boss.progress + 1, current.boss.target);
     const victory = nextProgress >= current.boss.target;
@@ -381,19 +412,63 @@ export function App() {
       status: victory ? ("completed" as const) : current.boss.status,
       completedAt: victory ? new Date().toISOString() : current.boss.completedAt
     };
-    const nextDashboard = {
-      ...current,
-      boss
-    };
-    setDashboard(nextDashboard);
 
     return {
       boss,
-      profile: nextDashboard.profile,
-      stats: nextDashboard.stats,
+      profile: current.profile,
+      stats: current.stats,
       victory,
+      progressed: nextProgress > current.boss.progress,
       unlockedAchievements: victory ? current.achievements : []
     };
+  }
+
+  function markQuestInDemo(quest: Quest, status: "skipped" | "replaced") {
+    setDashboard((current) =>
+      current
+        ? {
+            ...current,
+            todayQuests: current.todayQuests.map((item) => (item.id === quest.id ? { ...item, status } : item))
+          }
+        : current
+    );
+  }
+
+  function replaceQuestInDemo(quest: Quest) {
+    const current = dashboard ?? demoDashboard;
+    if (demoGeneratedCount(current) >= 3) {
+      setModal({ type: "notice", title: "ЛИМИТ ДОСТИГНУТ", body: "Сегодня уже создано 3 дополнительных демо-квеста." });
+      return false;
+    }
+
+    const replacement: Quest = {
+      ...(current.todayQuests.find((item) => item.category === "focus") ?? current.todayQuests[0]!),
+      id: `demo-replace-${Date.now()}`,
+      title: "30 минут глубокой работы",
+      description: "Проведи один непрерывный блок глубокой работы.",
+      type: "generated",
+      category: "focus",
+      difficulty: "medium",
+      xpReward: 35,
+      statRewardKey: "focus",
+      statRewardValue: 1,
+      status: "active",
+      completedAt: null,
+      createdAt: new Date().toISOString()
+    };
+
+    setDashboard({
+      ...current,
+      todayQuests: [
+        ...current.todayQuests.map((item) => (item.id === quest.id ? { ...item, status: "replaced" as const } : item)),
+        replacement
+      ]
+    });
+    return true;
+  }
+
+  function demoGeneratedCount(current: DashboardSummary) {
+    return current.todayQuests.filter((quest) => quest.type === "generated").length;
   }
 
   if (loading) {
@@ -429,6 +504,8 @@ export function App() {
           </button>
         ) : null}
 
+        {demoMode ? <DemoBanner /> : null}
+
         {view === "dashboard" ? (
           <DashboardView
             dashboard={dashboard}
@@ -442,11 +519,13 @@ export function App() {
             quests={dashboard.todayQuests}
             busyId={busyId}
             onCompleteQuest={onCompleteQuest}
+            onSkipQuest={onSkipQuest}
+            onReplaceQuest={onReplaceQuest}
             onGenerateQuest={onGenerateQuest}
           />
         ) : null}
         {view === "stats" ? <StatsView dashboard={dashboard} /> : null}
-        {view === "boss" ? <BossView dashboard={dashboard} busyId={busyId} onBossStep={onBossStep} onView={setView} /> : null}
+        {view === "boss" ? <BossView dashboard={dashboard} onView={setView} /> : null}
         {view === "profile" ? <ProfileView dashboard={dashboard} /> : null}
       </main>
 
@@ -494,6 +573,30 @@ function BootScreen({ label, message }: { label: string; message?: string }) {
         {message ? <p className="mt-5 text-sm text-system-muted">{message}</p> : null}
       </div>
     </div>
+  );
+}
+
+function DemoBanner() {
+  return (
+    <Panel className="mb-4 border-system-warning/45 bg-system-warning/10">
+      <div className="flex items-start gap-3">
+        <Zap className="mt-0.5 text-system-warning" size={18} />
+        <div className="min-w-0 flex-1">
+          <p className="font-mono text-sm font-black uppercase text-system-warning">ДЕМО-РЕЖИМ</p>
+          <p className="mt-1 text-sm text-system-muted">
+            Данные не сохраняются. Настоящий профиль, награды и прогресс доступны только при открытии Mini App из Telegram-бота.
+          </p>
+          <a
+            className="mt-3 inline-flex min-h-10 items-center border border-system-cyan/50 bg-system-cyan/10 px-3 py-2 font-mono text-xs font-bold uppercase text-system-cyan"
+            href="https://t.me"
+            rel="noreferrer"
+            target="_blank"
+          >
+            Открыть через Telegram
+          </a>
+        </div>
+      </div>
+    </Panel>
   );
 }
 
@@ -618,18 +721,22 @@ function QuestsView({
   quests,
   busyId,
   onCompleteQuest,
+  onSkipQuest,
+  onReplaceQuest,
   onGenerateQuest
 }: {
   quests: Quest[];
   busyId: string | null;
   onCompleteQuest: (quest: Quest) => void;
+  onSkipQuest: (quest: Quest) => void;
+  onReplaceQuest: (quest: Quest) => void;
   onGenerateQuest: () => void;
 }) {
   return (
     <div className="space-y-3">
       <ScreenTitle title="Ежедневные квесты" icon={<ListChecks size={20} />} />
       {quests.map((quest) => (
-        <Panel key={quest.id} className={quest.status === "completed" ? "border-system-success/45" : ""}>
+        <Panel key={quest.id} className={questPanelClass(quest.status)}>
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-black">{displayQuestTitle(quest)}</h2>
@@ -644,11 +751,27 @@ function QuestsView({
           </div>
           <div className="mt-4 flex items-center justify-between gap-3">
             <p className="font-mono text-xs text-system-muted">+{quest.statRewardValue} {STAT_LABELS_RU[quest.statRewardKey].short}</p>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2">
             <PrimaryButton
               disabled={quest.status !== "active" || busyId === quest.id}
               onClick={() => onCompleteQuest(quest)}
             >
               {quest.status === "completed" ? "Выполнено" : "Выполнить"}
+            </PrimaryButton>
+            <PrimaryButton
+              disabled={quest.status !== "active" || busyId === quest.id}
+              onClick={() => onSkipQuest(quest)}
+              variant="danger"
+            >
+              Пропустить
+            </PrimaryButton>
+            <PrimaryButton
+              disabled={quest.status !== "active" || busyId === quest.id}
+              onClick={() => onReplaceQuest(quest)}
+              variant="ghost"
+            >
+              Заменить
             </PrimaryButton>
           </div>
         </Panel>
@@ -694,16 +817,13 @@ function StatsView({ dashboard }: { dashboard: DashboardSummary }) {
 
 function BossView({
   dashboard,
-  busyId,
-  onBossStep,
   onView
 }: {
   dashboard: DashboardSummary;
-  busyId: string | null;
-  onBossStep: () => void;
   onView: (view: View) => void;
 }) {
   const boss = dashboard.boss;
+  const relatedQuests = dashboard.todayQuests.filter((quest) => quest.category === "focus");
 
   if (!boss) {
     return (
@@ -733,6 +853,25 @@ function BossView({
       <Panel>
         <p className="font-mono text-xs font-bold uppercase text-system-muted">Цель</p>
         <p className="mt-2 text-lg font-bold">{displayBossText(boss.objective)}</p>
+        <p className="mt-2 text-sm text-system-muted">
+          Прогресс босса засчитывается автоматически только за выполненные focus-квесты этой недели. Пустая кнопка больше не дает прогресс.
+        </p>
+      </Panel>
+
+      <Panel>
+        <p className="font-mono text-xs font-bold uppercase text-system-muted">Связанные квесты</p>
+        <div className="mt-3 space-y-2">
+          {relatedQuests.length === 0 ? (
+            <p className="text-sm text-system-muted">Сегодня focus-квестов нет. Создай новый квест или дождись дневного протокола.</p>
+          ) : (
+            relatedQuests.map((quest) => (
+              <div key={quest.id} className="flex items-center justify-between gap-3 border border-system-border bg-black/20 px-3 py-2">
+                <span className="min-w-0 truncate text-sm">{displayQuestTitle(quest)}</span>
+                <StatusPill status={quest.status} />
+              </div>
+            ))
+          )}
+        </div>
       </Panel>
 
       <Panel>
@@ -745,8 +884,8 @@ function BossView({
       </Panel>
 
       <div className="grid grid-cols-2 gap-2">
-        <PrimaryButton disabled={boss.status !== "active" || busyId === boss.id} onClick={onBossStep}>
-          Засчитать шаг
+        <PrimaryButton onClick={() => onView("quests")}>
+          К focus-квестам
         </PrimaryButton>
         <PrimaryButton onClick={() => onView("dashboard")} variant="ghost">Назад</PrimaryButton>
       </div>
@@ -826,6 +965,11 @@ function ResultModal({ modal, onClose }: { modal: NonNullable<AppModal>; onClose
               Уровень {modal.result.levelUp.from} -&gt; {modal.result.levelUp.to}
             </p>
           ) : null}
+          {modal.result.bossProgress?.progressed ? (
+            <p className="rounded-md border border-system-danger/40 bg-system-danger/10 p-3 font-mono text-system-danger">
+              Босс: {modal.result.bossProgress.boss.progress} / {modal.result.bossProgress.boss.target}
+            </p>
+          ) : null}
         </div>
       </Modal>
     );
@@ -867,7 +1011,7 @@ function StatusPill({ status }: { status: Quest["status"] }) {
   const className =
     status === "completed"
       ? "border-system-success/50 bg-system-success/10 text-system-success"
-      : status === "skipped"
+      : status === "skipped" || status === "replaced"
         ? "border-system-danger/50 bg-system-danger/10 text-system-danger"
         : "border-system-cyan/50 bg-system-cyan/10 text-system-cyan";
 
@@ -876,6 +1020,12 @@ function StatusPill({ status }: { status: Quest["status"] }) {
       {STATUS_LABELS_RU[status]}
     </span>
   );
+}
+
+function questPanelClass(status: Quest["status"]) {
+  if (status === "completed") return "border-system-success/45";
+  if (status === "skipped" || status === "replaced") return "border-system-danger/40 opacity-75";
+  return "";
 }
 
 function difficultyColor(difficulty: Quest["difficulty"]) {

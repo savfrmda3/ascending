@@ -25,4 +25,9 @@ values
   ('10 минут практики речи', 'Практикуй четкую речь 10 минут.', 'charisma', 'easy', 15, 'charisma', 1),
   ('Записать короткое голосовое', 'Запиши короткое голосовое и один раз прослушай его.', 'charisma', 'easy', 15, 'charisma', 1),
   ('Сделать комплимент', 'Сделай сегодня один искренний комплимент.', 'charisma', 'easy', 15, 'charisma', 1)
-on conflict do nothing;
+on conflict (title, category, difficulty) do update set
+  description = excluded.description,
+  xp_reward = excluded.xp_reward,
+  stat_reward_key = excluded.stat_reward_key,
+  stat_reward_value = excluded.stat_reward_value,
+  is_active = true;

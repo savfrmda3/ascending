@@ -31,6 +31,7 @@ SUPABASE_SERVICE_ROLE_KEY=
 JWT_SECRET=
 WEBHOOK_SETUP_SECRET=
 TELEGRAM_WEBHOOK_SECRET=
+ENABLE_SUPABASE_DEBUG=false
 NODE_ENV=production
 ```
 
@@ -61,7 +62,7 @@ This sets:
 - Bot commands
 - Telegram Menu Button / Web App button URL
 
-If `WEBHOOK_SETUP_SECRET` is empty, the setup URL works without `?secret=...`, but keeping the secret is safer.
+In production `WEBHOOK_SETUP_SECRET` is required. If it is empty, the setup endpoint refuses to run.
 
 In BotFather, the Menu Button / Web App URL should be the same value as `MINI_APP_URL`.
 
@@ -78,9 +79,10 @@ supabase db execute --file supabase/seed.sql
 Without the Supabase CLI, run these files in Supabase SQL Editor:
 
 - `supabase/migrations/20260518000000_init_system_hunter.sql`
+- `supabase/migrations/20260519000000_p0_progression_safety.sql`
 - `supabase/seed.sql`
 
-The app uses `SUPABASE_SERVICE_ROLE_KEY` only inside Vercel serverless functions. Do not expose it to browser-side code.
+The app uses `SUPABASE_SERVICE_ROLE_KEY` only inside Vercel serverless functions. Do not expose it to browser-side code. The `/api/debug/supabase` endpoint is disabled in production unless `ENABLE_SUPABASE_DEBUG=true` is set intentionally.
 
 ## Local Development
 

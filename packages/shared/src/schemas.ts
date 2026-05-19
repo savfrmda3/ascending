@@ -1,13 +1,17 @@
 import { z } from "zod";
 
 export const telegramAuthSchema = z.object({
-  initData: z.string().min(1, "Telegram initData is required")
+  initData: z.string().min(1, "Telegram initData is required"),
+  timezone: z.string().trim().min(1).max(80).optional().nullable(),
+  timezoneOffset: z.coerce.number().int().min(-840).max(840).optional().nullable()
 });
 
 export const telegramUserSyncSchema = z.object({
   telegramId: z.coerce.number().int().positive(),
   username: z.string().optional().nullable(),
-  firstName: z.string().optional().nullable()
+  firstName: z.string().optional().nullable(),
+  timezone: z.string().trim().min(1).max(80).optional().nullable(),
+  timezoneOffset: z.coerce.number().int().min(-840).max(840).optional().nullable()
 });
 
 export const completeBotQuestSchema = z.object({

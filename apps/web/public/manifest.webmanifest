@@ -1,0 +1,16 @@
+{
+  "name": "System Hunter",
+  "short_name": "System Hunter",
+  "description": "RPG-система саморазвития для Telegram Mini App.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#06070D",
+  "theme_color": "#06070D",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

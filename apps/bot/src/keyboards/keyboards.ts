@@ -56,8 +56,8 @@ export function questCompletedKeyboard() {
 export function bossKeyboard(boss: WeeklyBoss | null) {
   const rows = boss
     ? [
-        [Markup.button.callback("Complete Step", `boss_progress:${boss.id}`)],
-        [Markup.button.callback("Boss Details", `boss_details:${boss.id}`)]
+        [Markup.button.callback("К focus-квестам", "show_today_quests")],
+        [Markup.button.callback("Детали босса", `boss_details:${boss.id}`)]
       ]
     : [];
 

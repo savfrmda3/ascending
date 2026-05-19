@@ -6,11 +6,21 @@ import { requireSession, signSession, validateTelegramInitData } from "./auth.js
 import { handleTelegramWebhook, setupTelegramWebhook, verifyTelegramWebhookSecret } from "./bot.js";
 import { optionalEnv } from "./env.js";
 import { supabase, supabaseUrl } from "./db.js";
-import { notFound, readBody, sendData, sendError, unauthorized, type ApiRequest, type ApiResponse } from "./http.js";
+import {
+  notFound,
+  readBody,
+  sendData,
+  sendError,
+  tooManyRequests,
+  unauthorized,
+  type ApiRequest,
+  type ApiResponse
+} from "./http.js";
 import { hunterService } from "./hunter.js";
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
-  setCorsHeaders(res);
+  setSecurityHeaders(res);
+  setCorsHeaders(req, res);
 
   if (req.method === "OPTIONS") {
     res.status(204).send("");
@@ -46,6 +56,9 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
   }
 
   if (method === "GET" && path === "debug/supabase") {
+    if (isProduction() && optionalEnv("ENABLE_SUPABASE_DEBUG") !== "true") {
+      throw notFound("Route not found");
+    }
     verifySetupSecret(req);
     return { data: await diagnoseSupabase() };
   }
@@ -57,12 +70,15 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
   }
 
   if (method === "POST" && path === "auth/telegram") {
+    rateLimit(req, "auth:telegram", 12, 60_000);
     const body = telegramAuthSchema.parse(await readBody(req));
     const telegramUser = validateTelegramInitData(body.initData);
     const bundle = await hunterService.syncTelegramUser({
       telegramId: telegramUser.id,
       username: telegramUser.username ?? null,
-      firstName: telegramUser.first_name ?? null
+      firstName: telegramUser.first_name ?? null,
+      timezone: body.timezone ?? null,
+      timezoneOffset: body.timezoneOffset ?? null
     });
 
     return {
@@ -94,17 +110,26 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
   }
 
   if (method === "POST" && path === "quests/generate") {
+    rateLimit(req, `quests:generate:${session.userId}`, 8, 60_000);
     return { data: await hunterService.generateQuest(session.userId), status: 201 };
   }
 
   if (method === "POST" && segments[0] === "quests" && segments[2] === "complete") {
+    rateLimit(req, `quests:complete:${session.userId}`, 20, 60_000);
     const params = uuidParamSchema.parse({ id: segments[1] });
     return { data: await hunterService.completeQuest(session.userId, params.id) };
   }
 
   if (method === "POST" && segments[0] === "quests" && segments[2] === "skip") {
+    rateLimit(req, `quests:skip:${session.userId}`, 20, 60_000);
     const params = uuidParamSchema.parse({ id: segments[1] });
     return { data: await hunterService.skipQuest(session.userId, params.id) };
+  }
+
+  if (method === "POST" && segments[0] === "quests" && segments[2] === "replace") {
+    rateLimit(req, `quests:replace:${session.userId}`, 8, 60_000);
+    const params = uuidParamSchema.parse({ id: segments[1] });
+    return { data: await hunterService.replaceQuest(session.userId, params.id), status: 201 };
   }
 
   if (method === "GET" && path === "boss/current") {
@@ -112,6 +137,7 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
   }
 
   if (method === "POST" && segments[0] === "boss" && (segments[2] === "progress" || segments[2] === "complete")) {
+    rateLimit(req, `boss:progress:${session.userId}`, 12, 60_000);
     const params = uuidParamSchema.parse({ id: segments[1] });
     return { data: await hunterService.progressBoss(session.userId, params.id) };
   }
@@ -192,20 +218,87 @@ function splitSegment(value: string) {
 
 function verifySetupSecret(req: ApiRequest) {
   const expected = optionalEnv("WEBHOOK_SETUP_SECRET");
-  if (!expected) return;
+  if (!expected) {
+    if (isProduction()) throw unauthorized("Webhook setup secret is not configured");
+    return;
+  }
 
   const url = req.url ? new URL(req.url, "https://local.test") : null;
   const provided = url?.searchParams.get("secret") ?? getHeader(req, "x-setup-secret");
   if (provided !== expected) throw unauthorized("Invalid webhook setup secret");
 }
 
-function setCorsHeaders(res: ApiResponse) {
-  res.setHeader("access-control-allow-origin", "*");
+function setCorsHeaders(req: ApiRequest, res: ApiResponse) {
+  const origin = getHeader(req, "origin");
+  const allowedOrigins = allowedCorsOrigins(req);
+  const allowOrigin = origin && allowedOrigins.has(origin) ? origin : allowedOrigins.values().next().value;
+
+  if (allowOrigin) res.setHeader("access-control-allow-origin", allowOrigin);
+  res.setHeader("vary", "origin");
   res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
-  res.setHeader("access-control-allow-headers", "content-type,authorization,x-setup-secret");
+  res.setHeader("access-control-allow-headers", "content-type,authorization,x-setup-secret,x-telegram-bot-api-secret-token");
+}
+
+function setSecurityHeaders(res: ApiResponse) {
+  res.setHeader("x-content-type-options", "nosniff");
+  res.setHeader("referrer-policy", "no-referrer");
+  res.setHeader("x-frame-options", "SAMEORIGIN");
+  res.setHeader("permissions-policy", "camera=(), microphone=(), geolocation=()");
 }
 
 function getHeader(req: ApiRequest, name: string) {
   const value = req.headers[name] ?? req.headers[name.toLowerCase()];
   return Array.isArray(value) ? value[0] : value;
 }
+
+function allowedCorsOrigins(req: ApiRequest) {
+  const origins = new Set<string>();
+  const miniAppUrl = optionalEnv("MINI_APP_URL");
+  const publicOrigin = getRequestOrigin(req);
+
+  if (miniAppUrl) {
+    try {
+      origins.add(new URL(miniAppUrl).origin);
+    } catch {
+      // Invalid env values should not open CORS wider than intended.
+    }
+  }
+  if (publicOrigin) origins.add(publicOrigin);
+
+  return origins;
+}
+
+function getRequestOrigin(req: ApiRequest) {
+  const proto = getHeader(req, "x-forwarded-proto") || "https";
+  const host = getHeader(req, "x-forwarded-host") || getHeader(req, "host");
+  return host ? `${proto}://${host}` : null;
+}
+
+function isProduction() {
+  return optionalEnv("NODE_ENV") === "production";
+}
+
+function rateLimit(req: ApiRequest, bucket: string, limit: number, windowMs: number) {
+  const key = `${clientIp(req)}:${bucket}`;
+  const now = Date.now();
+  const current = rateLimitStore.get(key);
+
+  if (!current || current.resetAt <= now) {
+    rateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
+    return;
+  }
+
+  current.count += 1;
+  if (current.count > limit) throw tooManyRequests("Rate limit exceeded");
+}
+
+function clientIp(req: ApiRequest) {
+  const forwarded = getHeader(req, "x-forwarded-for");
+  return forwarded?.split(",")[0]?.trim() || getHeader(req, "x-real-ip") || "unknown";
+}
+
+const globalRateLimit = globalThis as typeof globalThis & {
+  __systemHunterRateLimit?: Map<string, { count: number; resetAt: number }>;
+};
+const rateLimitStore = globalRateLimit.__systemHunterRateLimit ?? new Map<string, { count: number; resetAt: number }>();
+globalRateLimit.__systemHunterRateLimit = rateLimitStore;

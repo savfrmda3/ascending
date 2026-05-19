@@ -16,6 +16,8 @@ export const demoDashboard: DashboardSummary = {
     streak: 4,
     hp: 100,
     energy: 82,
+    timezone: "Europe/Minsk",
+    timezoneOffset: -180,
     className: "Охотник фокуса",
     currentTitle: "Охотник фокуса",
     totalXp: 1240,

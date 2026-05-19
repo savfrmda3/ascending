@@ -299,7 +299,7 @@ function bossKeyboard(boss: WeeklyBoss | null, req: ApiRequest) {
   const bossRows =
     boss?.status === "active"
       ? [
-          [{ text: "Засчитать шаг", callback_data: `boss_progress:${boss.id}` }],
+          [{ text: "К focus-квестам", callback_data: "show_today_quests" }],
           [{ text: "Детали босса", callback_data: `boss_details:${boss.id}` }]
         ]
       : [];
@@ -414,6 +414,7 @@ function renderBoss(boss: WeeklyBoss | null) {
     "",
     `Цель: ${escapeHtml(boss.objective)}`,
     `Прогресс: <b>${boss.progress}</b> / ${boss.target}`,
+    "Засчитываются только выполненные focus-квесты этой недели.",
     "",
     `Награда: +${boss.xpReward} XP, +${boss.statRewardValue} ${STAT_LABELS[boss.statRewardKey].short}`,
     "Титул: Охотник фокуса",
