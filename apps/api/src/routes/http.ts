@@ -3,6 +3,9 @@ import jwt from "jsonwebtoken";
 import {
   botBossProgressSchema,
   completeBotQuestSchema,
+  keyParamSchema,
+  squadCreateSchema,
+  squadJoinSchema,
   telegramAuthSchema,
   telegramIdParamSchema,
   telegramUserSyncSchema,
@@ -196,6 +199,45 @@ router.get(
   })
 );
 
+router.get(
+  "/api/systems",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw badRequest("Missing auth context");
+    res.json({ data: await hunterService.getSystemsOverview(req.auth.userId) });
+  })
+);
+
+router.post(
+  "/api/skills/:key/unlock",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw badRequest("Missing auth context");
+    const params = keyParamSchema.parse(req.params);
+    res.json({ data: await hunterService.unlockSkill(req.auth.userId, params.key) });
+  })
+);
+
+router.post(
+  "/api/squad/create",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw badRequest("Missing auth context");
+    const body = squadCreateSchema.parse(req.body);
+    res.status(201).json({ data: await hunterService.createSquad(req.auth.userId, body.name) });
+  })
+);
+
+router.post(
+  "/api/squad/join",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw badRequest("Missing auth context");
+    const body = squadJoinSchema.parse(req.body);
+    res.json({ data: await hunterService.joinSquad(req.auth.userId, body.code) });
+  })
+);
+
 router.post(
   "/api/bot/user/sync",
   requireBotToken,
@@ -238,6 +280,15 @@ router.get(
   asyncHandler(async (req, res) => {
     const params = telegramIdParamSchema.parse(req.params);
     res.json({ data: await hunterService.getProfileByTelegramId(params.telegramId) });
+  })
+);
+
+router.get(
+  "/api/bot/systems/:telegramId",
+  requireBotToken,
+  asyncHandler(async (req, res) => {
+    const params = telegramIdParamSchema.parse(req.params);
+    res.json({ data: await hunterService.getSystemsByTelegramId(params.telegramId) });
   })
 );
 

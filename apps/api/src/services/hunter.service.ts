@@ -4,6 +4,7 @@ import {
   XP_REWARDS,
   applyXp,
   rankForLevel,
+  type AdminOverview,
   type Achievement,
   type AchievementCollectionItem,
   type AchievementRarity,
@@ -12,12 +13,20 @@ import {
   type QuestCompletionResult,
   type Difficulty,
   type HunterGoal,
+  type InventoryCatalogItem,
+  type InventorySummary,
   type ProgressDay,
   type ProgressHistory,
   type Quest,
   type QuestCategory,
   type QuestTemplate,
+  type SeasonSummary,
+  type SkillNode,
+  type SkillTreeSummary,
+  type SkillUnlockResult,
+  type SquadSummary,
   type StatKey,
+  type SystemsOverview,
   type UserSettings,
   type WeeklyRecap
 } from "@system-hunter/shared";
@@ -46,8 +55,15 @@ interface TelegramUserInput {
 }
 
 const DAILY_GENERATED_QUEST_LIMIT = 3;
+const GENERATE_QUEST_ENERGY_COST = 8;
+const HARD_QUEST_ENERGY_COST = 15;
+const SKIP_HP_PENALTY = 6;
+const REPLACE_HP_PENALTY = 2;
+const DAILY_RECOVERY_ENERGY = 18;
+const DAILY_RECOVERY_HP = 5;
 let timezoneColumnsAvailable: boolean | null = null;
 let userSettingsTableAvailable: boolean | null = null;
+let expansionTablesAvailable: boolean | null = null;
 
 const USER_SETTINGS_COLUMNS =
   "id,user_id,primary_goal,desired_difficulty,quests_per_day,wake_time,sleep_time,allow_physical_quests,preferred_categories,onboarding_completed,created_at,updated_at";
@@ -70,6 +86,38 @@ const DEFAULT_SETTINGS = {
   allowPhysicalQuests: true,
   preferredCategories: [] as QuestCategory[],
   onboardingCompleted: false
+};
+
+const DEFAULT_SKILL_NODES: SkillNode[] = [
+  { key: "focus_i", title: "Focus I", description: "Базовая защита от отвлечений.", statKey: "focus", tier: 1, cost: 1, bonusText: "+1 FOC при открытии" },
+  { key: "focus_ii", title: "Focus II", description: "Глубокие блоки даются легче.", statKey: "focus", tier: 2, cost: 2, bonusText: "+2 FOC при открытии" },
+  { key: "focus_iii", title: "Focus III", description: "Система чаще предлагает focus-квесты.", statKey: "focus", tier: 3, cost: 3, bonusText: "+3 FOC при открытии" },
+  { key: "discipline_i", title: "Discipline I", description: "Ритм дня становится стабильнее.", statKey: "discipline", tier: 1, cost: 1, bonusText: "+1 DSC при открытии" },
+  { key: "discipline_ii", title: "Discipline II", description: "Пропуски меньше ломают темп.", statKey: "discipline", tier: 2, cost: 2, bonusText: "+2 DSC при открытии" },
+  { key: "discipline_iii", title: "Discipline III", description: "Планирование усиливает серию.", statKey: "discipline", tier: 3, cost: 3, bonusText: "+3 DSC при открытии" },
+  { key: "vitality_i", title: "Vitality I", description: "Восстановление энергии ускоряется.", statKey: "vitality", tier: 1, cost: 1, bonusText: "+1 VIT при открытии" },
+  { key: "vitality_ii", title: "Vitality II", description: "Здоровье держится устойчивее.", statKey: "vitality", tier: 2, cost: 2, bonusText: "+2 VIT при открытии" },
+  { key: "vitality_iii", title: "Vitality III", description: "Тяжелые дни легче пережить.", statKey: "vitality", tier: 3, cost: 3, bonusText: "+3 VIT при открытии" },
+  { key: "charisma_i", title: "Charisma I", description: "Социальные квесты становятся проще.", statKey: "charisma", tier: 1, cost: 1, bonusText: "+1 CHA при открытии" },
+  { key: "charisma_ii", title: "Charisma II", description: "Коммуникация получает инерцию.", statKey: "charisma", tier: 2, cost: 2, bonusText: "+2 CHA при открытии" },
+  { key: "charisma_iii", title: "Charisma III", description: "Голос охотника звучит увереннее.", statKey: "charisma", tier: 3, cost: 3, bonusText: "+3 CHA при открытии" }
+];
+
+const DEFAULT_INVENTORY_CATALOG: InventoryCatalogItem[] = [
+  { key: "streak_shield", title: "Щит серии", description: "Одноразовая защита серии для будущей механики восстановления.", type: "shield", rarity: "rare", effectKey: "streak_protection", effectValue: 1 },
+  { key: "focus_booster", title: "Фокус-ускоритель", description: "Награда за победу над боссом фокуса.", type: "booster", rarity: "epic", effectKey: "focus_bonus", effectValue: 1 },
+  { key: "iron_frame", title: "Железная рамка", description: "Косметическая рамка профиля за стабильный прогресс.", type: "frame", rarity: "common", effectKey: null, effectValue: 0 },
+  { key: "season_title_token", title: "Жетон сезонного титула", description: "Открывает сезонный титул после завершения сезона.", type: "title", rarity: "legendary", effectKey: "title_unlock", effectValue: 1 }
+];
+
+const DEFAULT_SEASON = {
+  key: "awakening-2026-05",
+  title: "Сезон пробуждения",
+  description: "Первый сезон System Hunter: закрепи ритм и победи давление.",
+  startsAt: "2026-05-01",
+  endsAt: "2026-05-31",
+  bossName: "Архонт инерции",
+  rewardTitle: "Пробужденный охотник"
 };
 
 interface AchievementCatalogItem {
@@ -323,12 +371,16 @@ export class HunterService {
 
     if (error) throw badRequest("Unable to replace quest", error);
     if (!replaced) throw conflict("Quest is not active");
+    await this.adjustVitals(userId, { hpDelta: -REPLACE_HP_PENALTY });
     return this.insertGeneratedQuest(userId, prepared.template, prepared.today);
   }
 
   async completeQuest(userId: string, questId: string): Promise<QuestCompletionResult> {
     const quest = await this.getQuestRow(userId, questId);
     if (quest.status !== "active") throw conflict("Quest is not active");
+    if (quest.difficulty === "hard") {
+      await this.spendEnergy(userId, HARD_QUEST_ENERGY_COST, "Not enough energy for hard quest");
+    }
 
     const { data: updatedQuest, error: questError } = await supabase
       .from("quests")
@@ -346,6 +398,7 @@ export class HunterService {
     if (!updatedQuest) throw conflict("Quest is not active");
 
     const award = await this.awardUser(userId, quest.xp_reward, quest.stat_reward_key, quest.stat_reward_value);
+    await this.applyQuestVitals(userId, toQuest(quest));
     const streak = await this.calculateStreak(userId);
 
     await supabase
@@ -357,6 +410,7 @@ export class HunterService {
       .eq("id", userId);
 
     const bossProgress = await this.syncBossProgress(userId);
+    await this.syncSeasonProgress(userId, { questXp: quest.xp_reward });
     const unlockedAchievements = [
       ...(await this.evaluateAchievements(userId, {
         leveledUp: award.leveledUp
@@ -412,6 +466,7 @@ export class HunterService {
 
     if (error) throw badRequest("Unable to skip quest", error);
     if (!data) throw conflict("Quest is not active");
+    await this.adjustVitals(userId, { hpDelta: -SKIP_HP_PENALTY });
     return toQuest(data as QuestRow);
   }
 
@@ -507,6 +562,104 @@ export class HunterService {
     };
   }
 
+  async getSystemsOverview(userId: string): Promise<SystemsOverview> {
+    const [skills, inventory, season, squad, admin] = await Promise.all([
+      this.getSkillTree(userId),
+      this.getInventory(userId),
+      this.getSeasonSummary(userId),
+      this.getSquadSummary(userId),
+      this.getAdminOverview(userId)
+    ]);
+
+    return { skills, inventory, season, squad, admin };
+  }
+
+  async getSystemsByTelegramId(telegramId: number): Promise<SystemsOverview> {
+    const user = await this.getUserByTelegramId(telegramId);
+    return this.getSystemsOverview(user.id);
+  }
+
+  async unlockSkill(userId: string, key: string): Promise<SkillUnlockResult> {
+    const tree = await this.getSkillTree(userId);
+    const node = tree.nodes.find((item) => item.key === key);
+    if (!node) throw notFound("Skill node not found");
+    if (node.unlocked) throw conflict("Skill already unlocked");
+    if (!node.canUnlock) throw conflict("Skill requirements are not met");
+    if (tree.availablePoints < node.cost) throw conflict("Not enough skill points");
+
+    const { error } = await supabase.from("user_skills").insert({ user_id: userId, skill_key: key });
+    if (error) {
+      if (isMissingExpansionTable(error)) {
+        expansionTablesAvailable = false;
+        throw badRequest("Expansion systems storage is not ready", error);
+      }
+      if (error.code === "23505") throw conflict("Skill already unlocked");
+      throw badRequest("Unable to unlock skill", error);
+    }
+
+    await this.increaseStat(userId, node.statKey, node.tier);
+    const [{ profile, stats }, skills] = await Promise.all([
+      this.getProfileBundle(userId),
+      this.getSkillTree(userId)
+    ]);
+
+    return { skills, profile, stats };
+  }
+
+  async createSquad(userId: string, name: string) {
+    const existing = await this.getSquadSummary(userId);
+    if (existing) return existing;
+
+    const { data: squad, error } = await supabase
+      .from("squads")
+      .insert({ owner_user_id: userId, name })
+      .select("id,name,code,created_at")
+      .single();
+
+    if (error || !squad) {
+      if (isMissingExpansionTable(error)) {
+        expansionTablesAvailable = false;
+        throw badRequest("Expansion systems storage is not ready", error);
+      }
+      throw badRequest("Unable to create squad", error);
+    }
+
+    const { error: memberError } = await supabase
+      .from("squad_members")
+      .insert({ squad_id: squad.id, user_id: userId, role: "owner" });
+
+    if (memberError) throw badRequest("Unable to join created squad", memberError);
+    return this.getSquadSummary(userId);
+  }
+
+  async joinSquad(userId: string, code: string) {
+    const existing = await this.getSquadSummary(userId);
+    if (existing) throw conflict("User already has a squad");
+
+    const { data: squad, error } = await supabase
+      .from("squads")
+      .select("id")
+      .eq("code", code.trim().toUpperCase())
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingExpansionTable(error)) {
+        expansionTablesAvailable = false;
+        throw badRequest("Expansion systems storage is not ready", error);
+      }
+      throw badRequest("Unable to load squad", error);
+    }
+    if (!squad) throw notFound("Squad not found");
+
+    const { error: memberError } = await supabase
+      .from("squad_members")
+      .insert({ squad_id: squad.id, user_id: userId, role: "member" });
+
+    if (memberError?.code === "23505") throw conflict("User already has a squad");
+    if (memberError) throw badRequest("Unable to join squad", memberError);
+    return this.getSquadSummary(userId);
+  }
+
   private async getAchievementCollection(userId: string): Promise<AchievementCollectionItem[]> {
     const [unlockedAchievements, metrics] = await Promise.all([
       this.getAchievements(userId),
@@ -552,6 +705,296 @@ export class HunterService {
       vitalityCompleted: byCategory.vitality,
       intelligenceCompleted: byCategory.intelligence,
       charismaCompleted: byCategory.charisma
+    };
+  }
+
+  private async getSkillTree(userId: string): Promise<SkillTreeSummary> {
+    const [nodes, unlockedRows, profile, bossesDefeated] = await Promise.all([
+      this.getSkillNodes(),
+      this.getUnlockedSkillRows(userId),
+      this.getProfileBundle(userId).then((bundle) => bundle.profile),
+      this.countCompletedBosses(userId)
+    ]);
+    const unlocked = new Map(unlockedRows.map((row) => [row.skill_key, row.unlocked_at]));
+    const spentPoints = nodes
+      .filter((node) => unlocked.has(node.key))
+      .reduce((total, node) => total + node.cost, 0);
+    const totalPoints = Math.max(0, Math.floor(profile.level / 2) + bossesDefeated * 2);
+    const availablePoints = Math.max(0, totalPoints - spentPoints);
+
+    return {
+      totalPoints,
+      spentPoints,
+      availablePoints,
+      nodes: nodes.map((node) => {
+        const unlockedAt = unlocked.get(node.key) ?? null;
+        return {
+          ...node,
+          unlocked: Boolean(unlockedAt),
+          unlockedAt,
+          canUnlock: Boolean(unlockedAt) ? false : availablePoints >= node.cost && skillPrerequisiteMet(node, unlocked)
+        };
+      })
+    };
+  }
+
+  private async getSkillNodes(): Promise<SkillNode[]> {
+    if (expansionTablesAvailable === false) return DEFAULT_SKILL_NODES;
+
+    const { data, error } = await supabase
+      .from("skill_nodes")
+      .select("key,title,description,stat_key,tier,cost,bonus_text")
+      .eq("is_active", true)
+      .order("stat_key", { ascending: true })
+      .order("tier", { ascending: true });
+
+    if (error) {
+      if (isMissingExpansionTable(error)) {
+        expansionTablesAvailable = false;
+        return DEFAULT_SKILL_NODES;
+      }
+      throw badRequest("Unable to load skill tree", error);
+    }
+
+    expansionTablesAvailable = true;
+    return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+      key: row.key as string,
+      title: row.title as string,
+      description: row.description as string,
+      statKey: row.stat_key as StatKey,
+      tier: row.tier as 1 | 2 | 3,
+      cost: row.cost as number,
+      bonusText: row.bonus_text as string
+    }));
+  }
+
+  private async getUnlockedSkillRows(userId: string): Promise<Array<{ skill_key: string; unlocked_at: string }>> {
+    if (expansionTablesAvailable === false) return [];
+
+    const { data, error } = await supabase
+      .from("user_skills")
+      .select("skill_key,unlocked_at")
+      .eq("user_id", userId);
+
+    if (error) {
+      if (isMissingExpansionTable(error)) {
+        expansionTablesAvailable = false;
+        return [];
+      }
+      throw badRequest("Unable to load unlocked skills", error);
+    }
+
+    expansionTablesAvailable = true;
+    return (data ?? []) as Array<{ skill_key: string; unlocked_at: string }>;
+  }
+
+  private async getInventory(userId: string): Promise<InventorySummary> {
+    const [catalog, rows] = await Promise.all([this.getInventoryCatalog(), this.getUserInventoryRows(userId)]);
+    const catalogByKey = new Map(catalog.map((item) => [item.key, item]));
+
+    return {
+      catalog,
+      items: rows
+        .map((row) => {
+          const item = catalogByKey.get(row.item_key);
+          if (!item) return null;
+          return { item, quantity: row.quantity, acquiredAt: row.acquired_at };
+        })
+        .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    };
+  }
+
+  private async getInventoryCatalog(): Promise<InventoryCatalogItem[]> {
+    if (expansionTablesAvailable === false) return DEFAULT_INVENTORY_CATALOG;
+
+    const { data, error } = await supabase
+      .from("inventory_items")
+      .select("key,title,description,type,rarity,effect_key,effect_value")
+      .eq("is_active", true)
+      .order("rarity", { ascending: true });
+
+    if (error) {
+      if (isMissingExpansionTable(error)) {
+        expansionTablesAvailable = false;
+        return DEFAULT_INVENTORY_CATALOG;
+      }
+      throw badRequest("Unable to load inventory catalog", error);
+    }
+
+    expansionTablesAvailable = true;
+    return ((data ?? []) as Array<Record<string, unknown>>).map(toInventoryItem);
+  }
+
+  private async getUserInventoryRows(userId: string): Promise<Array<{ item_key: string; quantity: number; acquired_at: string }>> {
+    if (expansionTablesAvailable === false) return [];
+
+    const { data, error } = await supabase
+      .from("user_inventory")
+      .select("item_key,quantity,acquired_at")
+      .eq("user_id", userId);
+
+    if (error) {
+      if (isMissingExpansionTable(error)) {
+        expansionTablesAvailable = false;
+        return [];
+      }
+      throw badRequest("Unable to load inventory", error);
+    }
+
+    expansionTablesAvailable = true;
+    return (data ?? []) as Array<{ item_key: string; quantity: number; acquired_at: string }>;
+  }
+
+  private async getSeasonSummary(userId: string): Promise<SeasonSummary | null> {
+    const { today } = await this.getDateContext(userId);
+    const season = await this.getCurrentSeason(today);
+    if (!season) return null;
+    const progress = await this.getSeasonProgress(userId, season.id);
+
+    return {
+      key: season.key,
+      title: season.title,
+      description: season.description,
+      startsAt: season.starts_at,
+      endsAt: season.ends_at,
+      bossName: season.boss_name,
+      rewardTitle: season.reward_title,
+      questsCompleted: progress?.quests_completed ?? 0,
+      bossesDefeated: progress?.bosses_defeated ?? 0,
+      xp: progress?.xp ?? 0,
+      rewardClaimed: progress?.reward_claimed ?? false
+    };
+  }
+
+  private async getCurrentSeason(today: string): Promise<any | null> {
+    if (expansionTablesAvailable === false) return { id: "default-season", ...toSeasonRow(DEFAULT_SEASON) };
+
+    const { data, error } = await supabase
+      .from("seasons")
+      .select("id,key,title,description,starts_at,ends_at,boss_name,reward_title")
+      .eq("is_active", true)
+      .lte("starts_at", today)
+      .gte("ends_at", today)
+      .order("starts_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingExpansionTable(error)) {
+        expansionTablesAvailable = false;
+        return { id: "default-season", ...toSeasonRow(DEFAULT_SEASON) };
+      }
+      throw badRequest("Unable to load season", error);
+    }
+
+    expansionTablesAvailable = true;
+    return data;
+  }
+
+  private async getSeasonProgress(userId: string, seasonId: string) {
+    if (expansionTablesAvailable === false || seasonId === "default-season") return null;
+
+    const { data, error } = await supabase
+      .from("season_progress")
+      .select("quests_completed,bosses_defeated,xp,reward_claimed")
+      .eq("user_id", userId)
+      .eq("season_id", seasonId)
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingExpansionTable(error)) {
+        expansionTablesAvailable = false;
+        return null;
+      }
+      throw badRequest("Unable to load season progress", error);
+    }
+
+    return data as { quests_completed: number; bosses_defeated: number; xp: number; reward_claimed: boolean } | null;
+  }
+
+  private async syncSeasonProgress(userId: string, event: { questXp?: number; bossDefeated?: boolean }) {
+    if (expansionTablesAvailable === false) return;
+    const { today } = await this.getDateContext(userId);
+    const season = await this.getCurrentSeason(today);
+    if (!season || season.id === "default-season") return;
+    const progress = await this.getSeasonProgress(userId, season.id);
+    const next = {
+      season_id: season.id,
+      user_id: userId,
+      quests_completed: (progress?.quests_completed ?? 0) + (event.questXp ? 1 : 0),
+      bosses_defeated: (progress?.bosses_defeated ?? 0) + (event.bossDefeated ? 1 : 0),
+      xp: (progress?.xp ?? 0) + (event.questXp ?? 0),
+      updated_at: new Date().toISOString()
+    };
+
+    const { error } = await supabase.from("season_progress").upsert(next, { onConflict: "season_id,user_id" });
+    if (error) {
+      if (isMissingExpansionTable(error)) {
+        expansionTablesAvailable = false;
+        return;
+      }
+      throw badRequest("Unable to update season progress", error);
+    }
+  }
+
+  private async getSquadSummary(userId: string): Promise<SquadSummary | null> {
+    if (expansionTablesAvailable === false) return null;
+
+    const { data, error } = await supabase
+      .from("squad_members")
+      .select("role,joined_at,squads(id,name,code,created_at)")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingExpansionTable(error)) {
+        expansionTablesAvailable = false;
+        return null;
+      }
+      throw badRequest("Unable to load squad", error);
+    }
+    const record = data as { role: "owner" | "member"; squads?: any[] | any } | null;
+    if (!record?.squads) return null;
+
+    const squad = Array.isArray(record.squads) ? record.squads[0] : record.squads;
+    const { count, error: countError } = await supabase
+      .from("squad_members")
+      .select("id", { count: "exact", head: true })
+      .eq("squad_id", squad.id);
+
+    if (countError) throw badRequest("Unable to count squad members", countError);
+    return {
+      id: squad.id,
+      name: squad.name,
+      code: squad.code,
+      role: record.role,
+      memberCount: count ?? 1,
+      createdAt: squad.created_at
+    };
+  }
+
+  private async getAdminOverview(userId: string): Promise<AdminOverview | null> {
+    const user = await this.getUserRow(userId);
+    if (!isAdminTelegramId(Number(user.telegram_id))) return null;
+    const { today } = await this.getDateContext(userId);
+    const [users, activeQuests, completedQuests, templates, bosses] = await Promise.all([
+      supabase.from("users").select("id", { count: "exact", head: true }),
+      supabase.from("quests").select("id", { count: "exact", head: true }).eq("due_date", today).eq("status", "active"),
+      supabase.from("quests").select("id", { count: "exact", head: true }).eq("due_date", today).eq("status", "completed"),
+      supabase.from("quest_templates").select("id", { count: "exact", head: true }).eq("is_active", true),
+      supabase.from("weekly_bosses").select("id", { count: "exact", head: true }).eq("status", "active")
+    ]);
+
+    for (const response of [users, activeQuests, completedQuests, templates, bosses]) {
+      if (response.error) throw badRequest("Unable to load admin overview", response.error);
+    }
+
+    return {
+      usersCount: users.count ?? 0,
+      activeQuestsToday: activeQuests.count ?? 0,
+      completedQuestsToday: completedQuests.count ?? 0,
+      templatesCount: templates.count ?? 0,
+      activeBossesCount: bosses.count ?? 0
     };
   }
 
@@ -719,6 +1162,7 @@ export class HunterService {
     if (error) throw badRequest("Unable to inspect daily quests", error);
     if ((data ?? []).length > 0) return;
 
+    await this.adjustVitals(userId, { hpDelta: DAILY_RECOVERY_HP, energyDelta: DAILY_RECOVERY_ENERGY });
     const settings = await this.getSettings(userId);
     const templates = pickRandomUniqueTemplates(await this.getPersonalizedQuestTemplates(userId, settings), settings.questsPerDay, new Set());
     if (templates.length === 0) throw badRequest("No quest templates are available");
@@ -792,6 +1236,7 @@ export class HunterService {
 
   private async createGeneratedQuest(userId: string) {
     const prepared = await this.prepareGeneratedQuest(userId);
+    await this.spendEnergy(userId, GENERATE_QUEST_ENERGY_COST, "Not enough energy to generate quest");
     return this.insertGeneratedQuest(userId, prepared.template, prepared.today);
   }
 
@@ -922,6 +1367,8 @@ export class HunterService {
         updatedBoss = toBoss(data as WeeklyBossRow);
         if (victory) {
           await this.awardUser(userId, currentBoss.xpReward, currentBoss.statRewardKey, currentBoss.statRewardValue, "Охотник фокуса");
+          await this.syncSeasonProgress(userId, { bossDefeated: true });
+          await this.awardInventoryItem(userId, "focus_booster", 1);
           unlockedAchievements = await this.evaluateAchievements(userId, { bossDefeated: true });
         }
       } else {
@@ -1013,6 +1460,9 @@ export class HunterService {
       xpReward: row.xp_reward as number,
       statRewardKey: row.stat_reward_key as StatKey,
       statRewardValue: row.stat_reward_value as number,
+      estimatedMinutes: (row.estimated_minutes as number | null | undefined) ?? undefined,
+      tags: Array.isArray(row.tags) ? (row.tags as QuestTemplate["tags"]) : [],
+      reason: (row.reason as string | null | undefined) ?? null,
       isActive: row.is_active as boolean
     }));
   }
@@ -1041,6 +1491,71 @@ export class HunterService {
     if (error) throw badRequest("Unable to load weekly boss", error);
     if (!data) throw notFound("Weekly boss not found");
     return data as WeeklyBossRow;
+  }
+
+  private async spendEnergy(userId: string, cost: number, message: string) {
+    const user = await this.getUserRow(userId);
+    if (Number(user.energy ?? 0) < cost) throw conflict(message);
+    await this.adjustVitals(userId, { energyDelta: -cost });
+  }
+
+  private async adjustVitals(userId: string, input: { hpDelta?: number; energyDelta?: number }) {
+    const user = await this.getUserRow(userId);
+    const hp = clampVital(Number(user.hp ?? 100) + (input.hpDelta ?? 0));
+    const energy = clampVital(Number(user.energy ?? 100) + (input.energyDelta ?? 0));
+    const { error } = await supabase
+      .from("users")
+      .update({ hp, energy, updated_at: new Date().toISOString() })
+      .eq("id", userId);
+
+    if (error) throw badRequest("Unable to update vitals", error);
+  }
+
+  private async applyQuestVitals(userId: string, quest: Quest) {
+    if (quest.category === "vitality") {
+      await this.adjustVitals(userId, { hpDelta: 10, energyDelta: quest.difficulty === "hard" ? 18 : 12 });
+      return;
+    }
+
+    if (quest.category === "strength" && quest.difficulty === "hard") {
+      await this.adjustVitals(userId, { hpDelta: 2 });
+    }
+  }
+
+  private async increaseStat(userId: string, statKey: StatKey, value: number) {
+    const stats = await this.ensureUserStats(userId);
+    const currentStat = Number((stats as unknown as Record<StatKey, number>)[statKey]);
+    const { error } = await supabase
+      .from("user_stats")
+      .update({ [statKey]: currentStat + value, updated_at: new Date().toISOString() })
+      .eq("user_id", userId);
+
+    if (error) throw badRequest("Unable to update stats", error);
+  }
+
+  private async awardInventoryItem(userId: string, itemKey: string, quantity: number) {
+    if (expansionTablesAvailable === false) return;
+    const existing = await this.getUserInventoryRows(userId);
+    const current = existing.find((item) => item.item_key === itemKey);
+    const { error } = await supabase
+      .from("user_inventory")
+      .upsert(
+        {
+          user_id: userId,
+          item_key: itemKey,
+          quantity: (current?.quantity ?? 0) + quantity,
+          acquired_at: current?.acquired_at ?? new Date().toISOString()
+        },
+        { onConflict: "user_id,item_key" }
+      );
+
+    if (error) {
+      if (isMissingExpansionTable(error)) {
+        expansionTablesAvailable = false;
+        return;
+      }
+      throw badRequest("Unable to award inventory item", error);
+    }
   }
 
   private async awardUser(
@@ -1198,7 +1713,19 @@ export class HunterService {
 
     const { data, error } = await supabase.from("achievements").insert(rows).select("*");
     if (error) throw badRequest("Unable to unlock achievement", error);
+    await Promise.all(rows.map((row) => this.awardAchievementItem(userId, row.key)));
     return ((data ?? []) as AchievementRow[]).map(toAchievement);
+  }
+
+  private async awardAchievementItem(userId: string, achievementKey: string) {
+    const itemByAchievement: Record<string, string | undefined> = {
+      streak_7: "streak_shield",
+      focus_hunter: "focus_booster",
+      discipline_initiate: "iron_frame",
+      streak_30: "season_title_token"
+    };
+    const itemKey = itemByAchievement[achievementKey];
+    if (itemKey) await this.awardInventoryItem(userId, itemKey, 1);
   }
 
   private pickRandom<T>(items: T[], count: number) {
@@ -1293,6 +1820,60 @@ function isMissingSettingsTable(error: unknown) {
     record.code === "PGRST205" ||
     String(record.message ?? "").includes("user_settings")
   );
+}
+
+function isMissingExpansionTable(error: unknown) {
+  const record = error as { code?: string; message?: string };
+  const message = String(record.message ?? "");
+  return (
+    record.code === "42P01" ||
+    record.code === "PGRST205" ||
+    ["skill_nodes", "user_skills", "inventory_items", "user_inventory", "seasons", "season_progress", "squads", "squad_members"]
+      .some((table) => message.includes(table))
+  );
+}
+
+function clampVital(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function skillPrerequisiteMet(node: SkillNode, unlocked: Map<string, string>) {
+  if (node.tier === 1) return true;
+  const previousTier = node.tier - 1;
+  const prefix = node.key.replace(/_i+$/i, "");
+  return unlocked.has(`${prefix}_${"i".repeat(previousTier)}`);
+}
+
+function toInventoryItem(row: Record<string, unknown>): InventoryCatalogItem {
+  return {
+    key: row.key as string,
+    title: row.title as string,
+    description: row.description as string,
+    type: row.type as InventoryCatalogItem["type"],
+    rarity: row.rarity as InventoryCatalogItem["rarity"],
+    effectKey: (row.effect_key as string | null | undefined) ?? null,
+    effectValue: (row.effect_value as number | undefined) ?? 0
+  };
+}
+
+function toSeasonRow(season: typeof DEFAULT_SEASON) {
+  return {
+    key: season.key,
+    title: season.title,
+    description: season.description,
+    starts_at: season.startsAt,
+    ends_at: season.endsAt,
+    boss_name: season.bossName,
+    reward_title: season.rewardTitle
+  };
+}
+
+function isAdminTelegramId(telegramId: number) {
+  const admins = (process.env.ADMIN_TELEGRAM_IDS ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return admins.includes(String(telegramId));
 }
 
 function buildProgressCalendar(quests: Quest[], since: string, today: string): ProgressDay[] {

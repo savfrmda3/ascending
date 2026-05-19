@@ -1,4 +1,4 @@
-import { STAT_LABELS, type HunterProfile, type Quest, type UserStats, type WeeklyBoss } from "@system-hunter/shared";
+import { STAT_LABELS, type HunterProfile, type Quest, type SystemsOverview, type UserStats, type WeeklyBoss } from "@system-hunter/shared";
 import { optionalEnv, requiredEnv } from "./env.js";
 import { hunterService } from "./hunter.js";
 import type { ApiRequest } from "./http.js";
@@ -58,6 +58,8 @@ export async function setupTelegramWebhook(req: ApiRequest) {
       { command: "quests", description: "Квесты на сегодня" },
       { command: "stats", description: "Характеристики" },
       { command: "boss", description: "Босс недели" },
+      { command: "systems", description: "Навыки, инвентарь и сезон" },
+      { command: "settings", description: "Настройки" },
       { command: "help", description: "Помощь" }
     ]
   });
@@ -115,6 +117,17 @@ async function handleMessage(message: TelegramMessage, req: ApiRequest) {
     return;
   }
 
+  if (text.startsWith("/systems")) {
+    const systems = await hunterService.getSystemsOverview(bundle.profile.id);
+    await sendMessage(chatId, renderSystems(systems), profileKeyboard(req));
+    return;
+  }
+
+  if (text.startsWith("/settings")) {
+    await sendMessage(chatId, renderSettingsHelp(), profileKeyboard(req));
+    return;
+  }
+
   if (text.startsWith("/help")) {
     await sendMessage(chatId, renderHelp(), helpKeyboard(req));
     return;
@@ -150,6 +163,13 @@ async function handleCallback(callback: TelegramCallbackQuery, req: ApiRequest) 
 
   if (data === "show_stats") {
     await editMessage(chatId, messageId, renderStats(bundle.profile, bundle.stats), profileKeyboard(req));
+    await answerCallback(callback.id);
+    return;
+  }
+
+  if (data === "show_systems") {
+    const systems = await hunterService.getSystemsOverview(bundle.profile.id);
+    await editMessage(chatId, messageId, renderSystems(systems), profileKeyboard(req));
     await answerCallback(callback.id);
     return;
   }
@@ -236,6 +256,7 @@ function mainMenuKeyboard(req: ApiRequest) {
         { text: "Профиль", callback_data: "show_profile" },
         { text: "Статы", callback_data: "show_stats" }
       ],
+      [{ text: "Системы", callback_data: "show_systems" }],
       [{ text: "Босс недели", callback_data: "show_boss" }],
       [{ text: "Получить новый квест", callback_data: "generate_quest" }],
       [{ text: "Помощь", callback_data: "show_help" }]
@@ -450,6 +471,39 @@ function renderBossVictory(boss: WeeklyBoss, profile: HunterProfile) {
   ].join("\n");
 }
 
+function renderSystems(systems: SystemsOverview) {
+  const unlocked = systems.skills.nodes.filter((node) => node.unlocked).length;
+  const ownedItems = systems.inventory.items.reduce((total, item) => total + item.quantity, 0);
+  const seasonLine = systems.season
+    ? `Сезон: <b>${escapeHtml(systems.season.title)}</b> / ${systems.season.questsCompleted} квестов`
+    : "Сезон: <b>нет активного сезона</b>";
+  const squadLine = systems.squad
+    ? `Отряд: <b>${escapeHtml(systems.squad.name)}</b> / ${systems.squad.memberCount} участников`
+    : "Отряд: <b>не создан</b>";
+
+  return [
+    "<b>РАСШИРЕННЫЕ СИСТЕМЫ</b>",
+    "",
+    `Очки навыков: <b>${systems.skills.availablePoints}</b> свободно / ${systems.skills.totalPoints} всего`,
+    `Навыки: <b>${unlocked}</b> / ${systems.skills.nodes.length} открыто`,
+    `Инвентарь: <b>${ownedItems}</b> предметов`,
+    seasonLine,
+    squadLine,
+    "",
+    "Управление навыками, инвентарём, сезонами и отрядом доступно в Mini App."
+  ].join("\n");
+}
+
+function renderSettingsHelp() {
+  return [
+    "<b>НАСТРОЙКИ</b>",
+    "",
+    "В Mini App можно выбрать цель, сложность, количество квестов, режим физических задач и любимые категории.",
+    "",
+    "Открой Mini App и перейди в профиль, чтобы изменить настройки без ручных команд."
+  ].join("\n");
+}
+
 function renderHelp() {
   return [
     "<b>ПОМОЩЬ</b>",
@@ -459,6 +513,8 @@ function renderHelp() {
     "/quests - квесты на сегодня",
     "/stats - характеристики",
     "/boss - босс недели",
+    "/systems - навыки, инвентарь и сезон",
+    "/settings - настройки",
     "/help - помощь"
   ].join("\n");
 }

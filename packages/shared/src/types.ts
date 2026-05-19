@@ -14,6 +14,18 @@ export type QuestStatus = "active" | "completed" | "skipped" | "replaced";
 export type BossStatus = "active" | "completed" | "expired";
 export type HunterGoal = "sport" | "discipline" | "study" | "focus" | "health" | "charisma";
 export type AchievementRarity = "common" | "rare" | "epic" | "legendary";
+export type QuestTag =
+  | "morning"
+  | "sleep"
+  | "nutrition"
+  | "work_study"
+  | "social"
+  | "digital_hygiene"
+  | "recovery"
+  | "movement"
+  | "planning";
+export type InventoryItemType = "title" | "frame" | "booster" | "shield";
+export type SkillTier = 1 | 2 | 3;
 
 export interface HunterProfile {
   id: string;
@@ -61,6 +73,9 @@ export interface Quest {
   xpReward: number;
   statRewardKey: StatKey;
   statRewardValue: number;
+  estimatedMinutes?: number | null;
+  tags?: QuestTag[];
+  reason?: string | null;
   status: QuestStatus;
   dueDate: string;
   completedAt: string | null;
@@ -76,6 +91,9 @@ export interface QuestTemplate {
   xpReward: number;
   statRewardKey: StatKey;
   statRewardValue: number;
+  estimatedMinutes?: number;
+  tags?: QuestTag[];
+  reason?: string | null;
   isActive?: boolean;
 }
 
@@ -166,6 +184,95 @@ export interface ProgressHistory {
   recentQuests: Quest[];
   weeklyRecap: WeeklyRecap;
   achievementCollection: AchievementCollectionItem[];
+}
+
+export interface SkillNode {
+  key: string;
+  title: string;
+  description: string;
+  statKey: StatKey;
+  tier: SkillTier;
+  cost: number;
+  bonusText: string;
+}
+
+export interface SkillNodeProgress extends SkillNode {
+  unlocked: boolean;
+  unlockedAt: string | null;
+  canUnlock: boolean;
+}
+
+export interface SkillTreeSummary {
+  totalPoints: number;
+  spentPoints: number;
+  availablePoints: number;
+  nodes: SkillNodeProgress[];
+}
+
+export interface InventoryCatalogItem {
+  key: string;
+  title: string;
+  description: string;
+  type: InventoryItemType;
+  rarity: AchievementRarity;
+  effectKey: string | null;
+  effectValue: number;
+}
+
+export interface UserInventoryItem {
+  item: InventoryCatalogItem;
+  quantity: number;
+  acquiredAt: string | null;
+}
+
+export interface InventorySummary {
+  items: UserInventoryItem[];
+  catalog: InventoryCatalogItem[];
+}
+
+export interface SeasonSummary {
+  key: string;
+  title: string;
+  description: string;
+  startsAt: string;
+  endsAt: string;
+  bossName: string;
+  rewardTitle: string;
+  questsCompleted: number;
+  bossesDefeated: number;
+  xp: number;
+  rewardClaimed: boolean;
+}
+
+export interface SquadSummary {
+  id: string;
+  name: string;
+  code: string;
+  role: "owner" | "member";
+  memberCount: number;
+  createdAt: string;
+}
+
+export interface AdminOverview {
+  usersCount: number;
+  activeQuestsToday: number;
+  completedQuestsToday: number;
+  templatesCount: number;
+  activeBossesCount: number;
+}
+
+export interface SystemsOverview {
+  skills: SkillTreeSummary;
+  inventory: InventorySummary;
+  season: SeasonSummary | null;
+  squad: SquadSummary | null;
+  admin: AdminOverview | null;
+}
+
+export interface SkillUnlockResult {
+  skills: SkillTreeSummary;
+  profile: HunterProfile;
+  stats: UserStats;
 }
 
 export interface QuestCompletionResult {

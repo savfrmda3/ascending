@@ -1,4 +1,7 @@
 import {
+  keyParamSchema,
+  squadCreateSchema,
+  squadJoinSchema,
   telegramAuthSchema,
   userSettingsUpdateSchema,
   uuidParamSchema
@@ -159,6 +162,28 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
 
   if (method === "GET" && path === "progress/history") {
     return { data: await hunterService.getProgressHistory(session.userId) };
+  }
+
+  if (method === "GET" && path === "systems") {
+    return { data: await hunterService.getSystemsOverview(session.userId) };
+  }
+
+  if (method === "POST" && segments[0] === "skills" && segments[2] === "unlock") {
+    rateLimit(req, `skills:unlock:${session.userId}`, 8, 60_000);
+    const params = keyParamSchema.parse({ key: segments[1] });
+    return { data: await hunterService.unlockSkill(session.userId, params.key) };
+  }
+
+  if (method === "POST" && path === "squad/create") {
+    rateLimit(req, `squad:create:${session.userId}`, 4, 60_000);
+    const body = squadCreateSchema.parse(await readBody(req));
+    return { data: await hunterService.createSquad(session.userId, body.name), status: 201 };
+  }
+
+  if (method === "POST" && path === "squad/join") {
+    rateLimit(req, `squad:join:${session.userId}`, 8, 60_000);
+    const body = squadJoinSchema.parse(await readBody(req));
+    return { data: await hunterService.joinSquad(session.userId, body.code) };
   }
 
   throw notFound("Route not found");

@@ -3,6 +3,7 @@ import type {
   HunterProfile,
   Quest,
   QuestCompletionResult,
+  SystemsOverview,
   UserStats,
   WeeklyBoss
 } from "@system-hunter/shared";
@@ -39,6 +40,10 @@ class BotApiClient {
 
   async getQuests(telegramId: number) {
     return this.request<Quest[]>(`/api/bot/quests/${telegramId}`);
+  }
+
+  async getSystems(telegramId: number) {
+    return this.request<SystemsOverview>(`/api/bot/systems/${telegramId}`);
   }
 
   async generateQuest(telegramId: number) {

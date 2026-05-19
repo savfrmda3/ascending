@@ -10,6 +10,7 @@ export function mainMenuKeyboard() {
       Markup.button.callback("Профиль", "show_profile"),
       Markup.button.callback("Статы", "show_stats")
     ],
+    [Markup.button.callback("Системы", "show_systems")],
     [Markup.button.callback("Босс недели", "show_boss")],
     [Markup.button.callback("Получить новый квест", "generate_quest")],
     [Markup.button.callback("Помощь", "show_help")]

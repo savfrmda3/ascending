@@ -31,6 +31,10 @@ export const uuidParamSchema = z.object({
   id: z.string().uuid()
 });
 
+export const keyParamSchema = z.object({
+  key: z.string().trim().min(2).max(80).regex(/^[a-z0-9_-]+$/)
+});
+
 export const telegramIdParamSchema = z.object({
   telegramId: z.coerce.number().int().positive()
 });
@@ -44,4 +48,12 @@ export const userSettingsUpdateSchema = z.object({
   allowPhysicalQuests: z.boolean().optional(),
   preferredCategories: z.array(questCategorySchema).max(6).optional(),
   onboardingCompleted: z.boolean().optional()
+});
+
+export const squadCreateSchema = z.object({
+  name: z.string().trim().min(2).max(40)
+});
+
+export const squadJoinSchema = z.object({
+  code: z.string().trim().min(4).max(16).regex(/^[A-Za-z0-9_-]+$/)
 });

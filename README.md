@@ -32,6 +32,7 @@ JWT_SECRET=
 WEBHOOK_SETUP_SECRET=
 TELEGRAM_WEBHOOK_SECRET=
 ENABLE_SUPABASE_DEBUG=false
+ADMIN_TELEGRAM_IDS=
 NODE_ENV=production
 ```
 
@@ -81,6 +82,7 @@ Without the Supabase CLI, run these files in Supabase SQL Editor:
 - `supabase/migrations/20260518000000_init_system_hunter.sql`
 - `supabase/migrations/20260519000000_p0_progression_safety.sql`
 - `supabase/migrations/20260519010000_user_settings_onboarding.sql`
+- `supabase/migrations/20260519020000_product_expansion_systems.sql`
 - `supabase/seed.sql`
 
 The app uses `SUPABASE_SERVICE_ROLE_KEY` only inside Vercel serverless functions. Do not expose it to browser-side code. The `/api/debug/supabase` endpoint is disabled in production unless `ENABLE_SUPABASE_DEBUG=true` is set intentionally.
@@ -135,6 +137,20 @@ On first real Telegram launch the Mini App asks the user to configure goal, diff
 
 The Mini App has a progress journal with a 30-day quest calendar, current weekly recap, recent quest history, and a locked/unlocked achievement collection. It is built from existing `quests`, `weekly_bosses`, and `achievements` tables, so this stage does not require a new migration.
 
+## Expanded RPG Systems
+
+The current product stage adds skill tree, inventory, season progress, squads, and an admin overview for Telegram IDs listed in `ADMIN_TELEGRAM_IDS`. Apply `20260519020000_product_expansion_systems.sql` before relying on these systems in production.
+
+Rewards now affect more than XP:
+
+- hard quests spend energy;
+- generated quests spend energy;
+- skipped/replaced quests reduce HP;
+- vitality quests restore HP/energy;
+- boss victory and selected achievements can grant inventory items.
+
+The standalone bot also has `/systems` and `/settings`. In the recommended Vercel setup the webhook bot commands are configured by `/api/telegram/setup`.
+
 ## Main Endpoints
 
 - `GET /api/health`
@@ -146,10 +162,15 @@ The Mini App has a progress journal with a 30-day quest calendar, current weekly
 - `POST /api/quests/generate`
 - `POST /api/quests/:id/complete`
 - `POST /api/quests/:id/skip`
+- `POST /api/quests/:id/replace`
 - `GET /api/boss/current`
 - `POST /api/boss/:id/progress`
 - `GET /api/achievements`
 - `GET /api/progress/history`
+- `GET /api/systems`
+- `POST /api/skills/:key/unlock`
+- `POST /api/squad/create`
+- `POST /api/squad/join`
 - `POST /api/telegram/webhook`
 - `GET /api/telegram/setup?secret=...`
 

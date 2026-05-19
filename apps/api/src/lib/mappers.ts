@@ -5,6 +5,7 @@ import type {
   Quest,
   QuestCategory,
   QuestStatus,
+  QuestTag,
   Rank,
   StatKey,
   UserStats,
@@ -53,6 +54,9 @@ export interface QuestRow {
   xp_reward: number;
   stat_reward_key: StatKey;
   stat_reward_value: number;
+  estimated_minutes?: number | null;
+  tags?: string[] | null;
+  reason?: string | null;
   status: QuestStatus;
   due_date: string;
   completed_at: string | null;
@@ -149,6 +153,9 @@ export function toQuest(row: QuestRow): Quest {
     xpReward: row.xp_reward,
     statRewardKey: row.stat_reward_key,
     statRewardValue: row.stat_reward_value,
+    estimatedMinutes: row.estimated_minutes ?? null,
+    tags: Array.isArray(row.tags) ? (row.tags as QuestTag[]) : [],
+    reason: row.reason ?? null,
     status: row.status,
     dueDate: row.due_date,
     completedAt: row.completed_at,

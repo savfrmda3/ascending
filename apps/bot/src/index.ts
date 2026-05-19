@@ -23,6 +23,8 @@ await bot.telegram.setMyCommands([
   { command: "quests", description: "Квесты на сегодня" },
   { command: "stats", description: "Характеристики" },
   { command: "boss", description: "Босс недели" },
+  { command: "systems", description: "Навыки, инвентарь и сезон" },
+  { command: "settings", description: "Настройки" },
   { command: "help", description: "Помощь" }
 ]);
 
