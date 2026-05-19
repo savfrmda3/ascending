@@ -107,17 +107,18 @@ cd apps/web
 npm run dev
 ```
 
-The production Mini App requires Telegram `initData`, so it must be opened from the bot or Telegram menu button. Opening the URL directly in a browser can show a locked/auth state.
+The production Mini App uses Telegram `initData` when it is opened from the bot or Telegram menu button. Opening the public URL directly in a browser shows a safe demo preview so ChatGPT and reviewers can inspect the full interface without Telegram auth.
 
-For external review by ChatGPT or a regular browser, open a safe demo preview:
+For external review by ChatGPT or a regular browser, open the same public app URL:
+
+```txt
+https://YOUR-VERCEL-DOMAIN
+```
+
+These explicit preview links also work:
 
 ```txt
 https://YOUR-VERCEL-DOMAIN/preview
-```
-
-You can also use:
-
-```txt
 https://YOUR-VERCEL-DOMAIN/?demo=1
 ```
 

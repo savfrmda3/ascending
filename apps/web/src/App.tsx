@@ -205,25 +205,6 @@ function formatRuDate(value: string) {
   return new Date(value).toLocaleDateString("ru-RU");
 }
 
-function isDemoPreviewRequested() {
-  const url = new URL(window.location.href);
-  const mode = url.searchParams.get("mode")?.toLowerCase();
-  const preview = url.searchParams.get("preview")?.toLowerCase();
-  const demo = url.searchParams.get("demo")?.toLowerCase();
-
-  return (
-    import.meta.env.DEV ||
-    url.pathname === "/preview" ||
-    url.pathname === "/demo" ||
-    mode === "demo" ||
-    preview === "1" ||
-    preview === "true" ||
-    preview === "chatgpt" ||
-    demo === "1" ||
-    demo === "true"
-  );
-}
-
 export function App() {
   const [view, setView] = useState<View>("dashboard");
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
@@ -238,13 +219,9 @@ export function App() {
       try {
         const initData = window.Telegram?.WebApp?.initData;
         if (!initData) {
-          if (isDemoPreviewRequested()) {
-            setDemoMode(true);
-            setDashboard(demoDashboard);
-            return;
-          }
-
-          throw new Error("Нет данных авторизации Telegram. Открой System Hunter из бота.");
+          setDemoMode(true);
+          setDashboard(demoDashboard);
+          return;
         }
 
         await authenticateTelegram(initData);
