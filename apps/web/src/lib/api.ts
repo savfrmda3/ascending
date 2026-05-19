@@ -3,7 +3,8 @@ import type {
   BossProgressResult,
   DashboardSummary,
   Quest,
-  QuestCompletionResult
+  QuestCompletionResult,
+  UserSettings
 } from "@system-hunter/shared";
 
 const API_BASE = __BACKEND_URL__.replace(/\/$/, "");
@@ -34,6 +35,13 @@ export async function authenticateTelegram(initData: string) {
 
 export function getDashboard() {
   return request<DashboardSummary>("/api/me");
+}
+
+export function updateSettings(input: Partial<UserSettings>) {
+  return request<UserSettings>("/api/settings", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
 }
 
 export function generateQuest() {
@@ -157,7 +165,11 @@ function translateApiMessage(message?: string) {
     "Achievement unlocked.": "Достижение открыто.",
     "Invalid JSON body": "Некорректный запрос к серверу",
     "Request body is too large": "Запрос слишком большой",
-    "Rate limit exceeded": "Слишком много действий подряд. Подожди немного и повтори."
+    "Rate limit exceeded": "Слишком много действий подряд. Подожди немного и повтори.",
+    "Settings storage is not ready": "Хранилище настроек еще не обновлено. Примени новую миграцию Supabase и повтори.",
+    "Unable to load settings": "Не удалось загрузить настройки",
+    "Unable to create settings": "Не удалось создать настройки",
+    "Unable to update settings": "Не удалось сохранить настройки"
   };
 
   return knownMessages[message] ?? message;

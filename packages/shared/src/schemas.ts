@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+const questCategorySchema = z.enum(["strength", "intelligence", "vitality", "discipline", "focus", "charisma"]);
+const difficultySchema = z.enum(["easy", "medium", "hard"]);
+
 export const telegramAuthSchema = z.object({
   initData: z.string().min(1, "Telegram initData is required"),
   timezone: z.string().trim().min(1).max(80).optional().nullable(),
@@ -30,4 +33,15 @@ export const uuidParamSchema = z.object({
 
 export const telegramIdParamSchema = z.object({
   telegramId: z.coerce.number().int().positive()
+});
+
+export const userSettingsUpdateSchema = z.object({
+  primaryGoal: z.enum(["sport", "discipline", "study", "focus", "health", "charisma"]).optional(),
+  desiredDifficulty: difficultySchema.optional(),
+  questsPerDay: z.coerce.number().int().min(1).max(7).optional(),
+  wakeTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional().nullable(),
+  sleepTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional().nullable(),
+  allowPhysicalQuests: z.boolean().optional(),
+  preferredCategories: z.array(questCategorySchema).max(6).optional(),
+  onboardingCompleted: z.boolean().optional()
 });

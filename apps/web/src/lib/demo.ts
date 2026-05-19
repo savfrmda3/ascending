@@ -37,6 +37,20 @@ export const demoDashboard: DashboardSummary = {
     createdAt: now,
     updatedAt: now
   },
+  settings: {
+    id: "demo-settings",
+    userId: "demo-user",
+    primaryGoal: "focus",
+    desiredDifficulty: "medium",
+    questsPerDay: 5,
+    wakeTime: "07:30",
+    sleepTime: "23:30",
+    allowPhysicalQuests: true,
+    preferredCategories: ["focus", "discipline"],
+    onboardingCompleted: true,
+    createdAt: now,
+    updatedAt: now
+  },
   todayQuests: [
     {
       id: "quest-1",

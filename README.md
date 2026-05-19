@@ -80,6 +80,7 @@ Without the Supabase CLI, run these files in Supabase SQL Editor:
 
 - `supabase/migrations/20260518000000_init_system_hunter.sql`
 - `supabase/migrations/20260519000000_p0_progression_safety.sql`
+- `supabase/migrations/20260519010000_user_settings_onboarding.sql`
 - `supabase/seed.sql`
 
 The app uses `SUPABASE_SERVICE_ROLE_KEY` only inside Vercel serverless functions. Do not expose it to browser-side code. The `/api/debug/supabase` endpoint is disabled in production unless `ENABLE_SUPABASE_DEBUG=true` is set intentionally.
@@ -125,6 +126,10 @@ https://YOUR-VERCEL-DOMAIN/?demo=1
 ```
 
 This mode loads the full Mini App UI with demo data only. It does not expose real Telegram users or Supabase data.
+
+## Personalization
+
+On first real Telegram launch the Mini App asks the user to configure goal, difficulty, daily quest count, day rhythm, physical-task limits, and preferred categories. These values are stored in `user_settings` and influence daily/generated quest selection. If the new migration has not been applied yet, the app falls back to default settings so the current production deploy keeps opening, but settings cannot be saved until the table exists.
 
 ## Main Endpoints
 

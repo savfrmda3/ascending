@@ -12,6 +12,7 @@ export type QuestCategory = StatKey;
 export type Difficulty = "easy" | "medium" | "hard";
 export type QuestStatus = "active" | "completed" | "skipped" | "replaced";
 export type BossStatus = "active" | "completed" | "expired";
+export type HunterGoal = "sport" | "discipline" | "study" | "focus" | "health" | "charisma";
 
 export interface HunterProfile {
   id: string;
@@ -104,9 +105,25 @@ export interface Achievement {
   unlockedAt: string;
 }
 
+export interface UserSettings {
+  id: string;
+  userId: string;
+  primaryGoal: HunterGoal;
+  desiredDifficulty: Difficulty;
+  questsPerDay: number;
+  wakeTime: string | null;
+  sleepTime: string | null;
+  allowPhysicalQuests: boolean;
+  preferredCategories: QuestCategory[];
+  onboardingCompleted: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DashboardSummary {
   profile: HunterProfile;
   stats: UserStats;
+  settings: UserSettings;
   todayQuests: Quest[];
   boss: WeeklyBoss | null;
   achievements: Achievement[];

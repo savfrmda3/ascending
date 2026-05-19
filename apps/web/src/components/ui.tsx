@@ -77,12 +77,14 @@ export function PrimaryButton({
   children,
   onClick,
   disabled = false,
-  variant = "primary"
+  variant = "primary",
+  type = "button"
 }: {
   children: ReactNode;
   onClick?: () => void;
   disabled?: boolean;
   variant?: "primary" | "ghost" | "danger";
+  type?: "button" | "submit";
 }) {
   const className =
     variant === "ghost"
@@ -96,7 +98,7 @@ export function PrimaryButton({
       onClick={onClick}
       disabled={disabled}
       className={`hud-button min-h-11 min-w-0 border px-3 py-2 text-center text-xs font-semibold leading-tight transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 sm:text-sm ${className}`}
-      type="button"
+      type={type}
     >
       {children}
     </button>

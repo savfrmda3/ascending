@@ -6,6 +6,7 @@ import {
   telegramAuthSchema,
   telegramIdParamSchema,
   telegramUserSyncSchema,
+  userSettingsUpdateSchema,
   uuidParamSchema
 } from "@system-hunter/shared";
 import { env } from "../config/env.js";
@@ -78,6 +79,25 @@ router.get(
   asyncHandler(async (req, res) => {
     if (!req.auth) throw badRequest("Missing auth context");
     res.json({ data: await hunterService.getStats(req.auth.userId) });
+  })
+);
+
+router.get(
+  "/api/settings",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw badRequest("Missing auth context");
+    res.json({ data: await hunterService.getSettings(req.auth.userId) });
+  })
+);
+
+router.post(
+  "/api/settings",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw badRequest("Missing auth context");
+    const body = userSettingsUpdateSchema.parse(req.body);
+    res.json({ data: await hunterService.updateSettings(req.auth.userId, body) });
   })
 );
 

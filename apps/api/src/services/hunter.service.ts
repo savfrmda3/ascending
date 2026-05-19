@@ -8,8 +8,12 @@ import {
   type BossProgressResult,
   type DashboardSummary,
   type QuestCompletionResult,
+  type Difficulty,
+  type HunterGoal,
+  type QuestCategory,
   type QuestTemplate,
-  type StatKey
+  type StatKey,
+  type UserSettings
 } from "@system-hunter/shared";
 import { supabase } from "../db/supabase.js";
 import { addDaysToDateString, getWeekRange, normalizeTimezoneOffset, todayDateString } from "../lib/dates.js";
@@ -37,6 +41,30 @@ interface TelegramUserInput {
 
 const DAILY_GENERATED_QUEST_LIMIT = 3;
 let timezoneColumnsAvailable: boolean | null = null;
+let userSettingsTableAvailable: boolean | null = null;
+
+const USER_SETTINGS_COLUMNS =
+  "id,user_id,primary_goal,desired_difficulty,quests_per_day,wake_time,sleep_time,allow_physical_quests,preferred_categories,onboarding_completed,created_at,updated_at";
+
+const GOAL_CATEGORY: Record<HunterGoal, QuestCategory> = {
+  sport: "strength",
+  discipline: "discipline",
+  study: "intelligence",
+  focus: "focus",
+  health: "vitality",
+  charisma: "charisma"
+};
+
+const DEFAULT_SETTINGS = {
+  primaryGoal: "focus" as HunterGoal,
+  desiredDifficulty: "medium" as Difficulty,
+  questsPerDay: 5,
+  wakeTime: null,
+  sleepTime: null,
+  allowPhysicalQuests: true,
+  preferredCategories: [] as QuestCategory[],
+  onboardingCompleted: false
+};
 
 const ACHIEVEMENTS: Record<string, { title: string; description: string }> = {
   first_quest: {
@@ -73,6 +101,7 @@ export class HunterService {
   async syncTelegramUser(input: TelegramUserInput) {
     const user = await this.createOrUpdateUser(input);
     await this.ensureUserStats(user.id);
+    await this.ensureSettings(user.id);
     await this.ensureDailyQuests(user.id);
     await this.ensureWeeklyBoss(user.id);
 
@@ -81,6 +110,7 @@ export class HunterService {
 
   async getDashboard(userId: string): Promise<DashboardSummary> {
     const { profile, stats } = await this.getProfileBundle(userId);
+    const settings = await this.getSettings(userId);
     const todayQuests = await this.getTodayQuests(userId);
     const boss = await this.getCurrentBoss(userId);
     const achievements = await this.getAchievements(userId);
@@ -88,6 +118,7 @@ export class HunterService {
     return {
       profile,
       stats,
+      settings,
       todayQuests,
       boss,
       achievements
@@ -115,6 +146,47 @@ export class HunterService {
 
   async getStats(userId: string) {
     return toStats(await this.ensureUserStats(userId));
+  }
+
+  async getSettings(userId: string) {
+    return this.ensureSettings(userId);
+  }
+
+  async updateSettings(userId: string, input: Partial<UserSettings>): Promise<UserSettings> {
+    if (userSettingsTableAvailable === false) throw badRequest("Settings storage is not ready");
+
+    const { data, error } = await supabase
+      .from("user_settings")
+      .update({
+        ...(input.primaryGoal ? { primary_goal: input.primaryGoal } : {}),
+        ...(input.desiredDifficulty ? { desired_difficulty: input.desiredDifficulty } : {}),
+        ...(typeof input.questsPerDay === "number" ? { quests_per_day: input.questsPerDay } : {}),
+        ...(input.wakeTime !== undefined ? { wake_time: input.wakeTime } : {}),
+        ...(input.sleepTime !== undefined ? { sleep_time: input.sleepTime } : {}),
+        ...(typeof input.allowPhysicalQuests === "boolean" ? { allow_physical_quests: input.allowPhysicalQuests } : {}),
+        ...(input.preferredCategories ? { preferred_categories: input.preferredCategories } : {}),
+        ...(typeof input.onboardingCompleted === "boolean" ? { onboarding_completed: input.onboardingCompleted } : {}),
+        updated_at: new Date().toISOString()
+      })
+      .eq("user_id", userId)
+      .select(USER_SETTINGS_COLUMNS)
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingSettingsTable(error)) {
+        userSettingsTableAvailable = false;
+        throw badRequest("Settings storage is not ready", error);
+      }
+      throw badRequest("Unable to update settings", error);
+    }
+
+    if (!data) {
+      await this.ensureSettings(userId);
+      return this.updateSettings(userId, input);
+    }
+
+    userSettingsTableAvailable = true;
+    return toSettings(data);
   }
 
   async getTodayQuests(userId: string) {
@@ -422,6 +494,46 @@ export class HunterService {
     return created as StatsRow;
   }
 
+  private async ensureSettings(userId: string): Promise<UserSettings> {
+    if (userSettingsTableAvailable === false) return defaultSettings(userId);
+
+    const { data, error } = await supabase
+      .from("user_settings")
+      .select(USER_SETTINGS_COLUMNS)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingSettingsTable(error)) {
+        userSettingsTableAvailable = false;
+        return defaultSettings(userId);
+      }
+      throw badRequest("Unable to load settings", error);
+    }
+
+    if (data) {
+      userSettingsTableAvailable = true;
+      return toSettings(data);
+    }
+
+    const { data: created, error: createError } = await supabase
+      .from("user_settings")
+      .insert({ user_id: userId })
+      .select(USER_SETTINGS_COLUMNS)
+      .single();
+
+    if (createError || !created) {
+      if (isMissingSettingsTable(createError)) {
+        userSettingsTableAvailable = false;
+        return defaultSettings(userId);
+      }
+      throw badRequest("Unable to create settings", createError);
+    }
+
+    userSettingsTableAvailable = true;
+    return toSettings(created);
+  }
+
   private async ensureDailyQuests(userId: string) {
     const { today } = await this.getDateContext(userId);
     const { data, error } = await supabase
@@ -434,7 +546,8 @@ export class HunterService {
     if (error) throw badRequest("Unable to inspect daily quests", error);
     if ((data ?? []).length > 0) return;
 
-    const templates = this.pickRandom(uniqueTemplates(await this.getQuestTemplates()), 5);
+    const settings = await this.getSettings(userId);
+    const templates = pickRandomUniqueTemplates(await this.getPersonalizedQuestTemplates(userId, settings), settings.questsPerDay, new Set());
     if (templates.length === 0) throw badRequest("No quest templates are available");
 
     const rows = templates.map((template) => ({
@@ -492,11 +605,13 @@ export class HunterService {
       throw conflict("Daily generated quest limit reached");
     }
 
+    const settings = await this.getSettings(userId);
     const existingKeys = new Set(todayQuests.map((quest) => questTemplateKey(quest.title, quest.category)));
-    const candidates = uniqueTemplates(await this.getQuestTemplates()).filter(
-      (template) => !existingKeys.has(questTemplateKey(template.title, template.category))
-    );
-    const template = this.pickRandom(candidates, 1)[0];
+    const template = pickRandomUniqueTemplates(
+      await this.getPersonalizedQuestTemplates(userId, settings),
+      1,
+      existingKeys
+    )[0];
 
     if (!template) throw conflict("No unique quest templates available today");
     return { template, today };
@@ -539,6 +654,54 @@ export class HunterService {
 
     if (error) throw badRequest("Unable to inspect quests", error);
     return ((data ?? []) as QuestRow[]).map(toQuest);
+  }
+
+  private async getPersonalizedQuestTemplates(userId: string, settings: UserSettings) {
+    const [templates, stats, recentSkippedCategories] = await Promise.all([
+      this.getQuestTemplates(),
+      this.ensureUserStats(userId).then(toStats),
+      this.getRecentSkippedCategories(userId)
+    ]);
+    const goalCategory = GOAL_CATEGORY[settings.primaryGoal];
+    const preferredCategories = new Set(settings.preferredCategories);
+    const weakCategory = STAT_KEYS.reduce<StatKey>(
+      (weakest, key) => (stats[key] < stats[weakest] ? key : weakest),
+      "strength"
+    );
+
+    return uniqueTemplates(templates)
+      .filter((template) => settings.allowPhysicalQuests || template.category !== "strength")
+      .map((template) => ({
+        template,
+        score:
+          (template.category === goalCategory ? 4 : 0) +
+          (preferredCategories.has(template.category) ? 3 : 0) +
+          (template.category === weakCategory ? 2 : 0) +
+          difficultyScore(template.difficulty, settings.desiredDifficulty) -
+          (recentSkippedCategories.has(template.category) ? 2 : 0) +
+          Math.random()
+      }))
+      .sort((left, right) => right.score - left.score)
+      .map((item) => item.template);
+  }
+
+  private async getRecentSkippedCategories(userId: string) {
+    const { data, error } = await supabase
+      .from("quests")
+      .select("category")
+      .eq("user_id", userId)
+      .eq("status", "skipped")
+      .order("created_at", { ascending: false })
+      .limit(8);
+
+    if (error) throw badRequest("Unable to inspect skipped quests", error);
+    const counts = new Map<QuestCategory, number>();
+    for (const row of data ?? []) {
+      const category = row.category as QuestCategory;
+      counts.set(category, (counts.get(category) ?? 0) + 1);
+    }
+
+    return new Set([...counts.entries()].filter(([, count]) => count >= 2).map(([category]) => category));
   }
 
   private async syncBossProgress(userId: string, boss?: ReturnType<typeof toBoss> | null): Promise<BossProgressResult | null> {
@@ -891,8 +1054,62 @@ function uniqueTemplates(templates: QuestTemplate[]) {
   });
 }
 
+function pickRandomUniqueTemplates(templates: QuestTemplate[], count: number, existingKeys: Set<string>) {
+  const selected: QuestTemplate[] = [];
+  const seen = new Set(existingKeys);
+
+  for (const template of templates) {
+    const key = questTemplateKey(template.title, template.category);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    selected.push(template);
+    if (selected.length >= count) break;
+  }
+
+  return selected;
+}
+
 function questTemplateKey(title: string, category: string) {
   return `${category.trim().toLowerCase()}::${title.trim().toLowerCase()}`;
+}
+
+function toSettings(row: any): UserSettings {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    primaryGoal: row.primary_goal,
+    desiredDifficulty: row.desired_difficulty,
+    questsPerDay: row.quests_per_day,
+    wakeTime: normalizeTime(row.wake_time),
+    sleepTime: normalizeTime(row.sleep_time),
+    allowPhysicalQuests: row.allow_physical_quests,
+    preferredCategories: Array.isArray(row.preferred_categories) ? row.preferred_categories : [],
+    onboardingCompleted: row.onboarding_completed,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function defaultSettings(userId: string): UserSettings {
+  const now = new Date().toISOString();
+  return {
+    id: `default-${userId}`,
+    userId,
+    ...DEFAULT_SETTINGS,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function normalizeTime(value: string | null | undefined) {
+  return value ? value.slice(0, 5) : null;
+}
+
+function difficultyScore(actual: Difficulty, desired: Difficulty) {
+  if (actual === desired) return 2;
+  if (desired === "hard" && actual === "medium") return 1;
+  if (desired === "easy" && actual === "hard") return -2;
+  return 0;
 }
 
 function isMissingTimezoneColumn(error: unknown) {
@@ -902,5 +1119,14 @@ function isMissingTimezoneColumn(error: unknown) {
     record.code === "PGRST204" ||
     String(record.message ?? "").includes("users.timezone") ||
     String(record.message ?? "").includes("timezone_offset")
+  );
+}
+
+function isMissingSettingsTable(error: unknown) {
+  const record = error as { code?: string; message?: string };
+  return (
+    record.code === "42P01" ||
+    record.code === "PGRST205" ||
+    String(record.message ?? "").includes("user_settings")
   );
 }

@@ -1,5 +1,6 @@
 import {
   telegramAuthSchema,
+  userSettingsUpdateSchema,
   uuidParamSchema
 } from "@system-hunter/shared";
 import { requireSession, signSession, validateTelegramInitData } from "./auth.js";
@@ -103,6 +104,16 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
   if (method === "GET" && path === "stats") {
     const bundle = await hunterService.getProfileBundle(session.userId);
     return { data: bundle.stats };
+  }
+
+  if (method === "GET" && path === "settings") {
+    return { data: await hunterService.getSettings(session.userId) };
+  }
+
+  if (method === "POST" && path === "settings") {
+    rateLimit(req, `settings:update:${session.userId}`, 10, 60_000);
+    const body = userSettingsUpdateSchema.parse(await readBody(req));
+    return { data: await hunterService.updateSettings(session.userId, body) };
   }
 
   if (method === "GET" && path === "quests/today") {

@@ -26,13 +26,14 @@ import {
   type DashboardSummary,
   type Quest,
   type QuestCompletionResult,
-  type StatKey
+  type StatKey,
+  type UserSettings
 } from "@system-hunter/shared";
 import { Modal, Panel, PrimaryButton, ProgressBar, Metric } from "./components/ui.js";
-import { authenticateTelegram, completeQuest, generateQuest, getDashboard, replaceQuest, skipQuest } from "./lib/api.js";
+import { authenticateTelegram, completeQuest, generateQuest, getDashboard, replaceQuest, skipQuest, updateSettings } from "./lib/api.js";
 import { demoDashboard } from "./lib/demo.js";
 
-type View = "dashboard" | "quests" | "stats" | "boss" | "profile";
+type View = "dashboard" | "quests" | "stats" | "boss" | "profile" | "settings";
 type AppModal =
   | { type: "quest"; result: QuestCompletionResult }
   | { type: "boss"; result: BossProgressResult }
@@ -78,6 +79,15 @@ const DIFFICULTY_LABELS_RU: Record<Quest["difficulty"], string> = {
   easy: "Легкий",
   medium: "Средний",
   hard: "Сложный"
+};
+
+const GOAL_LABELS_RU: Record<UserSettings["primaryGoal"], string> = {
+  sport: "Спорт",
+  discipline: "Дисциплина",
+  study: "Учеба",
+  focus: "Фокус",
+  health: "Здоровье",
+  charisma: "Харизма"
 };
 
 const STATUS_LABELS_RU: Record<Quest["status"], string> = {
@@ -245,6 +255,38 @@ export function App() {
   async function refresh() {
     if (demoMode) return;
     setDashboard(await getDashboard());
+  }
+
+  async function onSaveSettings(input: Partial<UserSettings>) {
+    setBusyId("settings");
+    try {
+      if (demoMode) {
+        setDashboard((current) =>
+          current
+            ? {
+                ...current,
+                settings: {
+                  ...current.settings,
+                  ...input,
+                  updatedAt: new Date().toISOString()
+                }
+              }
+            : current
+        );
+        setModal({ type: "notice", title: "НАСТРОЙКИ ДЕМО", body: "Настройки изменены только в текущем демо-сеансе." });
+        setView("dashboard");
+        return;
+      }
+
+      await updateSettings(input);
+      await refresh();
+      setModal({ type: "notice", title: "НАСТРОЙКИ СОХРАНЕНЫ", body: "Система обновит подбор следующих квестов с учетом твоего профиля." });
+      setView("dashboard");
+    } catch (caught) {
+      setModal({ type: "notice", title: "ОШИБКА НАСТРОЕК", body: caught instanceof Error ? caught.message : "Не удалось сохранить настройки" });
+    } finally {
+      setBusyId(null);
+    }
   }
 
   async function onCompleteQuest(quest: Quest) {
@@ -479,6 +521,8 @@ export function App() {
     return <BootScreen label="СИСТЕМА ЗАБЛОКИРОВАНА" message={error ?? "Не удалось загрузить профиль"} />;
   }
 
+  const onboardingRequired = !demoMode && !dashboard.settings.onboardingCompleted;
+
   return (
     <div className="app-frame min-h-screen bg-system-bg text-system-text">
       <div className="system-backdrop fixed inset-0" />
@@ -506,30 +550,51 @@ export function App() {
 
         {demoMode ? <DemoBanner /> : null}
 
-        {view === "dashboard" ? (
-          <DashboardView
-            dashboard={dashboard}
-            completedToday={completedToday}
-            onView={setView}
-            demoMode={demoMode}
+        {onboardingRequired ? (
+          <SettingsView
+            busy={busyId === "settings"}
+            mode="onboarding"
+            settings={dashboard.settings}
+            onBack={() => setView("dashboard")}
+            onSave={(input) => onSaveSettings({ ...input, onboardingCompleted: true })}
           />
-        ) : null}
-        {view === "quests" ? (
-          <QuestsView
-            quests={dashboard.todayQuests}
-            busyId={busyId}
-            onCompleteQuest={onCompleteQuest}
-            onSkipQuest={onSkipQuest}
-            onReplaceQuest={onReplaceQuest}
-            onGenerateQuest={onGenerateQuest}
-          />
-        ) : null}
-        {view === "stats" ? <StatsView dashboard={dashboard} /> : null}
-        {view === "boss" ? <BossView dashboard={dashboard} onView={setView} /> : null}
-        {view === "profile" ? <ProfileView dashboard={dashboard} /> : null}
+        ) : (
+          <>
+            {view === "dashboard" ? (
+              <DashboardView
+                dashboard={dashboard}
+                completedToday={completedToday}
+                onView={setView}
+                demoMode={demoMode}
+              />
+            ) : null}
+            {view === "quests" ? (
+              <QuestsView
+                quests={dashboard.todayQuests}
+                busyId={busyId}
+                onCompleteQuest={onCompleteQuest}
+                onSkipQuest={onSkipQuest}
+                onReplaceQuest={onReplaceQuest}
+                onGenerateQuest={onGenerateQuest}
+              />
+            ) : null}
+            {view === "stats" ? <StatsView dashboard={dashboard} /> : null}
+            {view === "boss" ? <BossView dashboard={dashboard} onView={setView} /> : null}
+            {view === "profile" ? <ProfileView dashboard={dashboard} onOpenSettings={() => setView("settings")} /> : null}
+            {view === "settings" ? (
+              <SettingsView
+                busy={busyId === "settings"}
+                mode="settings"
+                settings={dashboard.settings}
+                onBack={() => setView("profile")}
+                onSave={onSaveSettings}
+              />
+            ) : null}
+          </>
+        )}
       </main>
 
-      <nav className="nav-hud fixed inset-x-0 bottom-0 z-40 border-t px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl">
+      {onboardingRequired ? null : <nav className="nav-hud fixed inset-x-0 bottom-0 z-40 border-t px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl">
         <div className="mx-auto grid max-w-[414px] grid-cols-5 gap-1">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -551,7 +616,7 @@ export function App() {
             );
           })}
         </div>
-      </nav>
+      </nav>}
 
       {modal ? <ResultModal modal={modal} onClose={() => setModal(null)} /> : null}
     </div>
@@ -614,6 +679,7 @@ function DashboardView({
   const { profile, boss } = dashboard;
   const fatigue = Math.max(0, 100 - profile.energy);
   const bossProgress = boss ? `${boss.progress}/${boss.target}` : "--";
+  const nextQuest = dashboard.todayQuests.find((quest) => quest.status === "active");
 
   return (
     <div className="space-y-4">
@@ -682,6 +748,23 @@ function DashboardView({
           <ProgressBar value={profile.xp} max={profile.xpToNextLevel} />
         </div>
       </section>
+
+      <Panel className="border-system-warning/35 bg-system-warning/8">
+        <p className="font-mono text-xs font-bold uppercase text-system-muted">Следующее действие</p>
+        <div className="mt-2 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold">{nextQuest ? displayQuestTitle(nextQuest) : "Дневной протокол закрыт"}</h2>
+            <p className="mt-1 text-sm text-system-muted">
+              {nextQuest
+                ? `${CATEGORY_LABELS_RU[nextQuest.category]} / ${DIFFICULTY_LABELS_RU[nextQuest.difficulty]} / +${nextQuest.xpReward} XP`
+                : "Можно проверить босса или восстановиться до следующего дня."}
+            </p>
+          </div>
+          <PrimaryButton onClick={() => onView(nextQuest ? "quests" : "boss")} variant="ghost">
+            {nextQuest ? "Открыть" : "Босс"}
+          </PrimaryButton>
+        </div>
+      </Panel>
 
       <Panel className="border-system-cyan/40 bg-system-cyan/8">
         <div className="flex items-start gap-3">
@@ -893,7 +976,171 @@ function BossView({
   );
 }
 
-function ProfileView({ dashboard }: { dashboard: DashboardSummary }) {
+function SettingsView({
+  settings,
+  busy,
+  mode,
+  onSave,
+  onBack
+}: {
+  settings: UserSettings;
+  busy: boolean;
+  mode: "onboarding" | "settings";
+  onSave: (input: Partial<UserSettings>) => void;
+  onBack: () => void;
+}) {
+  const [draft, setDraft] = useState({
+    primaryGoal: settings.primaryGoal,
+    desiredDifficulty: settings.desiredDifficulty,
+    questsPerDay: settings.questsPerDay,
+    wakeTime: settings.wakeTime ?? "07:30",
+    sleepTime: settings.sleepTime ?? "23:30",
+    allowPhysicalQuests: settings.allowPhysicalQuests,
+    preferredCategories: settings.preferredCategories
+  });
+
+  function toggleCategory(category: Quest["category"]) {
+    setDraft((current) => {
+      const exists = current.preferredCategories.includes(category);
+      return {
+        ...current,
+        preferredCategories: exists
+          ? current.preferredCategories.filter((item) => item !== category)
+          : [...current.preferredCategories, category]
+      };
+    });
+  }
+
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave(draft);
+      }}
+    >
+      <ScreenTitle
+        title={mode === "onboarding" ? "Первичная настройка" : "Настройки"}
+        icon={<User size={20} />}
+      />
+
+      <Panel glow>
+        <p className="font-mono text-xs font-bold uppercase text-system-cyan">Цель охотника</p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {(Object.keys(GOAL_LABELS_RU) as UserSettings["primaryGoal"][]).map((goal) => (
+            <button
+              className={`hud-button min-h-11 border px-3 py-2 text-sm ${
+                draft.primaryGoal === goal
+                  ? "border-system-cyan/70 bg-system-cyan/15 text-system-cyan"
+                  : "border-system-border bg-white/5 text-system-muted"
+              }`}
+              key={goal}
+              onClick={() => setDraft((current) => ({ ...current, primaryGoal: goal }))}
+              type="button"
+            >
+              {GOAL_LABELS_RU[goal]}
+            </button>
+          ))}
+        </div>
+      </Panel>
+
+      <Panel>
+        <p className="font-mono text-xs font-bold uppercase text-system-muted">Сложность и объем</p>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {(["easy", "medium", "hard"] as Quest["difficulty"][]).map((difficulty) => (
+            <button
+              className={`hud-button min-h-11 border px-2 py-2 text-xs ${
+                draft.desiredDifficulty === difficulty
+                  ? "border-system-purple/70 bg-system-purple/30 text-white"
+                  : "border-system-border bg-white/5 text-system-muted"
+              }`}
+              key={difficulty}
+              onClick={() => setDraft((current) => ({ ...current, desiredDifficulty: difficulty }))}
+              type="button"
+            >
+              {DIFFICULTY_LABELS_RU[difficulty]}
+            </button>
+          ))}
+        </div>
+        <label className="mt-4 block text-sm text-system-muted">
+          Квестов в день: <span className="font-mono text-system-text">{draft.questsPerDay}</span>
+          <input
+            className="mt-2 w-full accent-system-cyan"
+            max={7}
+            min={1}
+            onChange={(event) => setDraft((current) => ({ ...current, questsPerDay: Number(event.target.value) }))}
+            type="range"
+            value={draft.questsPerDay}
+          />
+        </label>
+      </Panel>
+
+      <Panel>
+        <p className="font-mono text-xs font-bold uppercase text-system-muted">Ритм дня</p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <label className="text-sm text-system-muted">
+            Подъем
+            <input
+              className="mt-1 w-full border border-system-border bg-black/30 px-3 py-2 text-system-text outline-none focus-visible:border-system-cyan"
+              onChange={(event) => setDraft((current) => ({ ...current, wakeTime: event.target.value }))}
+              type="time"
+              value={draft.wakeTime}
+            />
+          </label>
+          <label className="text-sm text-system-muted">
+            Сон
+            <input
+              className="mt-1 w-full border border-system-border bg-black/30 px-3 py-2 text-system-text outline-none focus-visible:border-system-cyan"
+              onChange={(event) => setDraft((current) => ({ ...current, sleepTime: event.target.value }))}
+              type="time"
+              value={draft.sleepTime}
+            />
+          </label>
+        </div>
+      </Panel>
+
+      <Panel>
+        <label className="flex items-start gap-3 text-sm text-system-muted">
+          <input
+            checked={draft.allowPhysicalQuests}
+            className="mt-1 accent-system-cyan"
+            onChange={(event) => setDraft((current) => ({ ...current, allowPhysicalQuests: event.target.checked }))}
+            type="checkbox"
+          />
+          <span>
+            Включать физические квесты
+            <span className="mt-1 block text-xs text-system-muted">Если выключить, система не будет выдавать strength-квесты.</span>
+          </span>
+        </label>
+
+        <p className="mt-4 font-mono text-xs font-bold uppercase text-system-muted">Предпочитаемые категории</p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {STAT_KEYS.map((category) => (
+            <button
+              className={`hud-button min-h-10 border px-2 py-2 text-xs ${
+                draft.preferredCategories.includes(category)
+                  ? "border-system-cyan/70 bg-system-cyan/15 text-system-cyan"
+                  : "border-system-border bg-white/5 text-system-muted"
+              }`}
+              key={category}
+              onClick={() => toggleCategory(category)}
+              type="button"
+            >
+              {CATEGORY_LABELS_RU[category]}
+            </button>
+          ))}
+        </div>
+      </Panel>
+
+      <div className="grid grid-cols-2 gap-2">
+        <PrimaryButton disabled={busy} type="submit">Сохранить</PrimaryButton>
+        <PrimaryButton disabled={mode === "onboarding"} onClick={onBack} variant="ghost">Назад</PrimaryButton>
+      </div>
+    </form>
+  );
+}
+
+function ProfileView({ dashboard, onOpenSettings }: { dashboard: DashboardSummary; onOpenSettings: () => void }) {
   return (
     <div className="space-y-4">
       <ScreenTitle title="Профиль" icon={<User size={20} />} />
@@ -914,6 +1161,19 @@ function ProfileView({ dashboard }: { dashboard: DashboardSummary }) {
           <Metric label="Титул" value={displayTitle(dashboard.profile.currentTitle)} accent="text-system-success" />
           <Metric label="Серия" value={`${dashboard.profile.streak} дн.`} />
           <Metric label="Квесты" value={`${dashboard.profile.completedQuestsCount}`} />
+        </div>
+      </Panel>
+
+      <Panel>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-mono text-xs font-bold uppercase text-system-muted">Настройки системы</p>
+            <h2 className="mt-1 font-bold">{GOAL_LABELS_RU[dashboard.settings.primaryGoal]} / {DIFFICULTY_LABELS_RU[dashboard.settings.desiredDifficulty]}</h2>
+            <p className="mt-1 text-sm text-system-muted">
+              {dashboard.settings.questsPerDay} квестов в день, физические: {dashboard.settings.allowPhysicalQuests ? "включены" : "отключены"}
+            </p>
+          </div>
+          <PrimaryButton onClick={onOpenSettings} variant="ghost">Изменить</PrimaryButton>
         </div>
       </Panel>
 
