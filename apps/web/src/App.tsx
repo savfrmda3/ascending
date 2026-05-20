@@ -27,7 +27,9 @@ import {
   xpToNextLevel,
   type BossProgressResult,
   type CustomQuestInput,
+  type CustomQuestProgress,
   type CustomQuestTemplate,
+  type HabitDayStatus,
   type DashboardSummary,
   type ProgressHistory,
   type Quest,
@@ -50,6 +52,7 @@ import {
   enableCustomQuest,
   generateQuest,
   getCustomQuests,
+  getCustomQuestProgress,
   getDashboard,
   getProgressHistory,
   getSystemsOverview,
@@ -126,6 +129,13 @@ const WEEKDAY_LABELS_RU: Array<{ value: Weekday; label: string }> = [
   { value: 6, label: "Сб" },
   { value: 7, label: "Вс" }
 ];
+
+const HABIT_HEALTH_LABELS_RU: Record<CustomQuestProgress["healthStatus"], string> = {
+  stable: "Стабильно",
+  at_risk: "Сегодня в риске",
+  broken: "Серия сломана",
+  paused: "Пауза"
+};
 
 const GOAL_LABELS_RU: Record<UserSettings["primaryGoal"], string> = {
   sport: "Спорт",
@@ -313,6 +323,7 @@ export function App() {
   const [systems, setSystems] = useState<SystemsOverview | null>(null);
   const [systemsLoading, setSystemsLoading] = useState(false);
   const [customQuests, setCustomQuests] = useState<CustomQuestTemplate[]>([]);
+  const [customQuestProgress, setCustomQuestProgress] = useState<CustomQuestProgress[]>([]);
   const [customQuestsLoading, setCustomQuestsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -368,6 +379,7 @@ export function App() {
     setProgressHistory(null);
     setSystems(null);
     setCustomQuests([]);
+    setCustomQuestProgress([]);
   }
 
   async function loadProgressHistory() {
@@ -406,11 +418,15 @@ export function App() {
     setCustomQuestsLoading(true);
     try {
       if (demoMode) {
-        setCustomQuests(demoCustomQuestTemplates());
+        const templates = demoCustomQuestTemplates();
+        setCustomQuests(templates);
+        setCustomQuestProgress(buildDemoHabitProgress(templates, dashboard ?? demoDashboard));
         return;
       }
 
-      setCustomQuests(await getCustomQuests());
+      const [templates, progress] = await Promise.all([getCustomQuests(), getCustomQuestProgress()]);
+      setCustomQuests(templates);
+      setCustomQuestProgress(progress);
     } catch (caught) {
       setModal({ type: "notice", title: "МОИ КВЕСТЫ НЕДОСТУПНЫ", body: caught instanceof Error ? caught.message : "Не удалось загрузить пользовательские квесты" });
     } finally {
@@ -453,7 +469,9 @@ export function App() {
   async function reloadQuestSurfaces() {
     if (demoMode) return;
     setDashboard(await getDashboard());
-    setCustomQuests(await getCustomQuests());
+    const [templates, progress] = await Promise.all([getCustomQuests(), getCustomQuestProgress()]);
+    setCustomQuests(templates);
+    setCustomQuestProgress(progress);
     setProgressHistory(null);
   }
 
@@ -464,6 +482,7 @@ export function App() {
         const template = demoCustomQuestFromInput(input);
         setCustomQuests((current) => [template, ...current]);
         setDashboard((current) => current ? addDemoCustomQuestInstance(current, template) : current);
+        setCustomQuestProgress((current) => [buildDemoHabitProgress([template], dashboard ?? demoDashboard)[0]!, ...current]);
         setModal({ type: "notice", title: "ПРИВЫЧКА ДЕМО", body: "Пользовательский квест добавлен только в демо-сценарии." });
         return;
       }
@@ -483,6 +502,7 @@ export function App() {
     try {
       if (demoMode) {
         setCustomQuests((current) => current.map((item) => (item.id === id ? { ...item, ...demoCustomQuestFromInput({ ...item, ...input }), id } : item)));
+        setCustomQuestProgress((current) => buildDemoHabitProgress(current.map((item) => (item.template.id === id ? { ...item.template, ...demoCustomQuestFromInput({ ...item.template, ...input }), id } : item.template)), dashboard ?? demoDashboard));
         setModal({ type: "notice", title: "ПРИВЫЧКА ОБНОВЛЕНА", body: "Изменения сохранены только в демо-режиме." });
         return;
       }
@@ -502,6 +522,7 @@ export function App() {
     try {
       if (demoMode) {
         setCustomQuests((current) => current.map((item) => (item.id === template.id ? { ...item, isActive: !item.isActive } : item)));
+        setCustomQuestProgress((current) => current.map((item) => item.template.id === template.id ? { ...item, template: { ...item.template, isActive: !item.template.isActive }, healthStatus: item.template.isActive ? "paused" : "stable" } : item));
         setModal({ type: "notice", title: template.isActive ? "ПРИВЫЧКА ОТКЛЮЧЕНА" : "ПРИВЫЧКА ВКЛЮЧЕНА", body: "Статус изменен только в демо-режиме." });
         return;
       }
@@ -525,6 +546,7 @@ export function App() {
     try {
       if (demoMode) {
         setCustomQuests((current) => current.filter((item) => item.id !== template.id));
+        setCustomQuestProgress((current) => current.filter((item) => item.template.id !== template.id));
         setModal({ type: "notice", title: "ПРИВЫЧКА АРХИВИРОВАНА", body: "Шаблон удален только из демо-списка." });
         return;
       }
@@ -932,6 +954,78 @@ export function App() {
     };
   }
 
+  function buildDemoHabitProgress(templates: CustomQuestTemplate[], current: DashboardSummary): CustomQuestProgress[] {
+    const today = new Date().toISOString().slice(0, 10);
+    return templates.map((template) => {
+      const todayQuest = current.todayQuests.find((quest) => quest.customTemplateId === template.id) ?? null;
+      const calendar = Array.from({ length: 60 }, (_, index) => {
+        const date = addDaysIso(today, index - 59);
+        const due = demoHabitDue(template, date);
+        const quest = current.todayQuests.find((item) => item.customTemplateId === template.id && item.dueDate === date) ?? null;
+        const status: HabitDayStatus = quest?.status === "completed"
+          ? "completed"
+          : quest?.status === "skipped" || quest?.status === "replaced"
+            ? "skipped"
+            : date === today && due
+              ? "active"
+              : due && date < today
+                ? index % 9 === 0
+                  ? "missed"
+                  : "completed"
+                : "scheduled";
+        return { date, due, status, questId: quest?.id ?? null, xp: status === "completed" ? template.xpReward : 0 };
+      });
+      const dueDays = calendar.filter((day) => day.due);
+      const completedCount = dueDays.filter((day) => day.status === "completed").length;
+      const missedCount = dueDays.filter((day) => day.status === "missed").length;
+      const skippedCount = dueDays.filter((day) => day.status === "skipped").length;
+      const currentStreak = currentHabitStreakForDemo(dueDays, today);
+      return {
+        template,
+        currentStreak,
+        bestStreak: Math.max(currentStreak, 6),
+        scheduledCount: dueDays.length,
+        completedCount,
+        skippedCount,
+        missedCount,
+        completionRate: dueDays.length > 0 ? Math.round((completedCount / dueDays.length) * 100) : 0,
+        healthStatus: !template.isActive ? "paused" : missedCount > 2 ? "broken" : todayQuest?.status === "active" ? "at_risk" : "stable",
+        lastCompletedAt: new Date().toISOString(),
+        nextDueDate: todayQuest?.status === "active" ? today : addDaysIso(today, 1),
+        todayQuest,
+        calendar
+      };
+    });
+  }
+
+  function demoHabitDue(template: CustomQuestTemplate, date: string) {
+    const day = new Date(`${date}T00:00:00.000Z`).getUTCDay();
+    const iso = (day === 0 ? 7 : day) as Weekday;
+    if (template.recurrenceType === "once") return date === template.startsAt;
+    if (template.recurrenceType === "daily") return true;
+    if (template.recurrenceType === "weekly") return iso === 1;
+    return template.weekdays.includes(iso);
+  }
+
+  function addDaysIso(date: string, offset: number) {
+    const value = new Date(`${date}T00:00:00.000Z`);
+    value.setUTCDate(value.getUTCDate() + offset);
+    return value.toISOString().slice(0, 10);
+  }
+
+  function currentHabitStreakForDemo(days: Array<{ date: string; status: HabitDayStatus }>, today: string) {
+    let streak = 0;
+    for (const day of [...days].reverse()) {
+      if (day.date === today && day.status === "active") continue;
+      if (day.status === "completed") {
+        streak += 1;
+        continue;
+      }
+      break;
+    }
+    return streak;
+  }
+
   function buildDemoSystems(current: DashboardSummary): SystemsOverview {
     const unlockedKeys = new Set(["focus_i", "discipline_i"]);
     const nodes: SystemsOverview["skills"]["nodes"] = [
@@ -1087,6 +1181,7 @@ export function App() {
               <QuestsView
                 quests={dashboard.todayQuests}
                 customQuests={customQuests}
+                customQuestProgress={customQuestProgress}
                 customQuestsLoading={customQuestsLoading}
                 busyId={busyId}
                 onCompleteQuest={onCompleteQuest}
@@ -1346,6 +1441,7 @@ function VitalCell({ icon, label, value, max }: { icon: ReactNode; label: string
 function QuestsView({
   quests,
   customQuests,
+  customQuestProgress,
   customQuestsLoading,
   busyId,
   onCompleteQuest,
@@ -1360,6 +1456,7 @@ function QuestsView({
 }: {
   quests: Quest[];
   customQuests: CustomQuestTemplate[];
+  customQuestProgress: CustomQuestProgress[];
   customQuestsLoading: boolean;
   busyId: string | null;
   onCompleteQuest: (quest: Quest) => void;
@@ -1374,6 +1471,7 @@ function QuestsView({
 }) {
   const [formMode, setFormMode] = useState<"closed" | "create" | "edit">("closed");
   const [editingTemplate, setEditingTemplate] = useState<CustomQuestTemplate | null>(null);
+  const progressByTemplate = new Map(customQuestProgress.map((item) => [item.template.id, item]));
 
   function startCreate() {
     setEditingTemplate(null);
@@ -1482,7 +1580,9 @@ function QuestsView({
           {customQuests.length === 0 ? (
             <p className="text-sm text-system-muted">Пока нет пользовательских привычек. Создай первый квест и выбери повторение.</p>
           ) : (
-            customQuests.map((template) => (
+            customQuests.map((template) => {
+              const progress = progressByTemplate.get(template.id);
+              return (
               <div key={template.id} className={`border px-3 py-3 ${template.isActive ? "border-system-cyan/35 bg-black/20" : "border-system-border bg-black/10 opacity-75"}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -1495,8 +1595,9 @@ function QuestsView({
                       +{template.xpReward} XP, +{template.statRewardValue} {STAT_LABELS_RU[template.statRewardKey].short}
                     </p>
                   </div>
-                  <StatusBadge active={template.isActive} />
+                  <StatusBadge active={template.isActive} label={progress ? HABIT_HEALTH_LABELS_RU[progress.healthStatus] : undefined} />
                 </div>
+                {progress ? <HabitProgressPanel progress={progress} /> : null}
                 <div className="mt-3 grid grid-cols-3 gap-2">
                   <PrimaryButton disabled={busyId === template.id} onClick={() => startEdit(template)} variant="ghost">Изменить</PrimaryButton>
                   <PrimaryButton disabled={busyId === template.id} onClick={() => onToggleCustomQuest(template)} variant="ghost">
@@ -1505,7 +1606,8 @@ function QuestsView({
                   <PrimaryButton disabled={busyId === template.id} onClick={() => onDeleteCustomQuest(template)} variant="danger">Удалить</PrimaryButton>
                 </div>
               </div>
-            ))
+              );
+            })
           )}
         </div>
       </Panel>
@@ -1638,12 +1740,63 @@ function SelectField({
   );
 }
 
-function StatusBadge({ active }: { active: boolean }) {
+function HabitProgressPanel({ progress }: { progress: CustomQuestProgress }) {
+  const visibleDays = progress.calendar.slice(-21);
+  return (
+    <div className="mt-3 border border-system-border bg-black/20 p-3">
+      <div className="grid grid-cols-3 gap-2">
+        <Metric label="Серия" value={`${progress.currentStreak}`} accent={progress.healthStatus === "broken" ? "text-system-danger" : "text-system-success"} />
+        <Metric label="Рекорд" value={`${progress.bestStreak}`} accent="text-system-cyan" />
+        <Metric label="Точность" value={`${progress.completionRate}%`} accent="text-system-warning" />
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-3 text-xs text-system-muted">
+        <span>Следующий день: {progress.nextDueDate ? formatRuDate(progress.nextDueDate) : "нет"}</span>
+        <span>Пропуски: {progress.missedCount + progress.skippedCount}</span>
+      </div>
+      <div className="mt-3 grid grid-cols-7 gap-1" aria-label="Календарь привычки">
+        {visibleDays.map((day) => (
+          <div
+            key={day.date}
+            title={`${formatRuDate(day.date)} / ${habitDayStatusLabel(day.status)}`}
+            className={`h-6 border ${habitDayClass(day.status)}`}
+          />
+        ))}
+      </div>
+      {progress.healthStatus === "broken" ? (
+        <p className="mt-3 text-xs text-system-warning">Серия прервана. Выполни следующий экземпляр, чтобы начать восстановление ритма.</p>
+      ) : null}
+    </div>
+  );
+}
+
+function StatusBadge({ active, label }: { active: boolean; label?: string }) {
   return (
     <span className={`shrink-0 border px-2 py-1 font-mono text-[10px] font-bold uppercase ${active ? "border-system-success/60 text-system-success" : "border-system-border text-system-muted"}`}>
-      {active ? "Активна" : "Откл."}
+      {label ?? (active ? "Активна" : "Откл.")}
     </span>
   );
+}
+
+function habitDayClass(status: HabitDayStatus) {
+  const classes: Record<HabitDayStatus, string> = {
+    completed: "border-system-success bg-system-success/50 shadow-[0_0_10px_rgba(34,197,94,0.35)]",
+    skipped: "border-system-warning bg-system-warning/35",
+    missed: "border-system-danger bg-system-danger/40",
+    active: "border-system-cyan bg-system-cyan/35",
+    scheduled: "border-system-border bg-black/30"
+  };
+  return classes[status];
+}
+
+function habitDayStatusLabel(status: HabitDayStatus) {
+  const labels: Record<HabitDayStatus, string> = {
+    completed: "выполнено",
+    skipped: "пропущено",
+    missed: "не выполнено",
+    active: "активно сегодня",
+    scheduled: "не запланировано"
+  };
+  return labels[status];
 }
 
 function StatsView({ dashboard }: { dashboard: DashboardSummary }) {

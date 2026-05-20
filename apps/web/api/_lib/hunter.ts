@@ -15,7 +15,11 @@ import {
   type DashboardSummary,
   type Difficulty,
   type CustomQuestInput,
+  type CustomQuestProgress,
   type CustomQuestTemplate,
+  type HabitDayStatus,
+  type HabitHealthStatus,
+  type HabitProgressDay,
   type HunterGoal,
   type InventoryCatalogItem,
   type InventorySummary,
@@ -185,6 +189,8 @@ const USER_STATS_COLUMNS =
   "id,user_id,strength,intelligence,vitality,discipline,focus,charisma,created_at,updated_at";
 const QUEST_COLUMNS =
   "id,user_id,title,description,type,category,difficulty,xp_reward,stat_reward_key,stat_reward_value,status,due_date,completed_at,created_at";
+const CUSTOM_QUEST_INSTANCE_COLUMNS =
+  `${QUEST_COLUMNS},source,custom_template_id,reason`;
 const CUSTOM_QUEST_COLUMNS =
   "id,user_id,title,description,category,difficulty,xp_reward,stat_reward_key,stat_reward_value,recurrence_type,weekdays,starts_at,ends_at,is_active,deleted_at,created_at,updated_at";
 const BOSS_COLUMNS =
@@ -314,11 +320,22 @@ export class HunterService {
     const { today } = await this.getDateContext(userId);
     const { data, error } = await supabase
       .from("quests")
-      .select(QUEST_COLUMNS)
+      .select(customQuestTablesAvailable === false ? QUEST_COLUMNS : CUSTOM_QUEST_INSTANCE_COLUMNS)
       .eq("user_id", userId)
       .eq("due_date", today)
       .order("created_at", { ascending: true });
 
+    if (error && isMissingCustomQuestSchema(error)) {
+      customQuestTablesAvailable = false;
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from("quests")
+        .select(QUEST_COLUMNS)
+        .eq("user_id", userId)
+        .eq("due_date", today)
+        .order("created_at", { ascending: true });
+      if (fallbackError) throw badRequest("Unable to load today's quests", fallbackError);
+      return (fallbackData ?? []).map(toQuest);
+    }
     if (error) throw badRequest("Unable to load today's quests", error);
     return (data ?? []).map(toQuest);
   }
@@ -390,6 +407,20 @@ export class HunterService {
 
     customQuestTablesAvailable = true;
     return (data ?? []).map(toCustomQuestTemplate);
+  }
+
+  async getCustomQuestProgressList(userId: string): Promise<CustomQuestProgress[]> {
+    await this.ensureCustomQuestInstances(userId);
+    const templates = await this.getCustomQuests(userId);
+    return this.buildCustomQuestProgress(userId, templates);
+  }
+
+  async getCustomQuestProgress(userId: string, templateId: string): Promise<CustomQuestProgress> {
+    await this.ensureCustomQuestInstances(userId);
+    const template = await this.getCustomQuestTemplate(userId, templateId);
+    const [progress] = await this.buildCustomQuestProgress(userId, [template]);
+    if (!progress) throw notFound("Custom quest not found");
+    return progress;
   }
 
   async createCustomQuest(userId: string, input: CustomQuestInput): Promise<CustomQuestTemplate> {
@@ -1319,6 +1350,40 @@ export class HunterService {
     return toCustomQuestTemplate(data);
   }
 
+  private async buildCustomQuestProgress(userId: string, templates: CustomQuestTemplate[]): Promise<CustomQuestProgress[]> {
+    if (templates.length === 0) return [];
+    const { today } = await this.getDateContext(userId);
+    const since = addDaysToDateString(today, -59);
+    const templateIds = templates.map((template) => template.id);
+    const { data, error } = await supabase
+      .from("quests")
+      .select(CUSTOM_QUEST_INSTANCE_COLUMNS)
+      .eq("user_id", userId)
+      .in("custom_template_id", templateIds)
+      .gte("due_date", since)
+      .lte("due_date", today)
+      .order("due_date", { ascending: true });
+
+    if (error) {
+      if (isMissingCustomQuestSchema(error)) {
+        customQuestTablesAvailable = false;
+        throw badRequest("Custom quests storage is not ready", error);
+      }
+      throw badRequest("Unable to load custom quest progress", error);
+    }
+
+    const questsByTemplate = new Map<string, Quest[]>();
+    for (const quest of (data ?? []).map(toQuest)) {
+      const templateId = quest.customTemplateId;
+      if (!templateId) continue;
+      const bucket = questsByTemplate.get(templateId) ?? [];
+      bucket.push(quest);
+      questsByTemplate.set(templateId, bucket);
+    }
+
+    return templates.map((template) => buildHabitProgress(template, questsByTemplate.get(template.id) ?? [], since, today));
+  }
+
   private async prepareCustomQuestInput(userId: string, input: CustomQuestInput) {
     const { today } = await this.getDateContext(userId);
     const recurrenceType = input.recurrenceType;
@@ -2037,6 +2102,8 @@ function toQuest(row: any): Quest {
     estimatedMinutes: row.estimated_minutes ?? null,
     tags: Array.isArray(row.tags) ? row.tags : [],
     reason: row.reason ?? null,
+    source: row.source ?? (row.type === "generated" ? "generated" : row.type === "custom" ? "custom" : "system"),
+    customTemplateId: row.custom_template_id ?? null,
     status: row.status,
     dueDate: row.due_date,
     completedAt: row.completed_at,
@@ -2202,6 +2269,105 @@ function customQuestReason(template: CustomQuestTemplate) {
     weekdays: "привычка по выбранным дням"
   };
   return `Пользовательский протокол: ${recurrenceLabels[template.recurrenceType]}.`;
+}
+
+function buildHabitProgress(template: CustomQuestTemplate, quests: Quest[], since: string, today: string): CustomQuestProgress {
+  const questByDate = new Map(quests.map((quest) => [quest.dueDate, quest]));
+  const calendar: HabitProgressDay[] = [];
+  let cursor = since;
+
+  for (let index = 0; index < 60 && cursor <= today; index += 1) {
+    const due = shouldCreateCustomQuestToday(template, cursor);
+    const quest = questByDate.get(cursor) ?? null;
+    const status = habitDayStatus(cursor, today, due, quest);
+    calendar.push({
+      date: cursor,
+      due,
+      status,
+      questId: quest?.id ?? null,
+      xp: quest?.status === "completed" ? quest.xpReward : 0
+    });
+    cursor = addDaysToDateString(cursor, 1);
+  }
+
+  const scheduledDays = calendar.filter((day) => day.due);
+  const completedCount = scheduledDays.filter((day) => day.status === "completed").length;
+  const skippedCount = scheduledDays.filter((day) => day.status === "skipped").length;
+  const missedCount = scheduledDays.filter((day) => day.status === "missed").length;
+  const todayQuest = quests.find((quest) => quest.dueDate === today) ?? null;
+
+  return {
+    template,
+    currentStreak: currentHabitStreak(scheduledDays, today),
+    bestStreak: bestHabitStreak(scheduledDays),
+    scheduledCount: scheduledDays.length,
+    completedCount,
+    skippedCount,
+    missedCount,
+    completionRate: scheduledDays.length > 0 ? Math.round((completedCount / scheduledDays.length) * 100) : 0,
+    healthStatus: habitHealthStatus(template, scheduledDays, today),
+    lastCompletedAt: [...quests]
+      .filter((quest) => quest.status === "completed" && quest.completedAt)
+      .sort((left, right) => String(right.completedAt).localeCompare(String(left.completedAt)))[0]?.completedAt ?? null,
+    nextDueDate: nextHabitDueDate(template, today, todayQuest),
+    todayQuest,
+    calendar
+  };
+}
+
+function habitDayStatus(date: string, today: string, due: boolean, quest: Quest | null): HabitDayStatus {
+  if (!due) return "scheduled";
+  if (quest?.status === "completed") return "completed";
+  if (quest?.status === "skipped" || quest?.status === "replaced") return "skipped";
+  if (quest?.status === "active") return "active";
+  return date < today ? "missed" : "scheduled";
+}
+
+function currentHabitStreak(days: HabitProgressDay[], today: string) {
+  let streak = 0;
+  for (const day of [...days].reverse()) {
+    if (day.date === today && day.status === "active") continue;
+    if (day.status === "completed") {
+      streak += 1;
+      continue;
+    }
+    if (day.status === "scheduled" && day.date >= today) continue;
+    break;
+  }
+  return streak;
+}
+
+function bestHabitStreak(days: HabitProgressDay[]) {
+  let best = 0;
+  let current = 0;
+  for (const day of days) {
+    if (day.status === "completed") {
+      current += 1;
+      best = Math.max(best, current);
+    } else if (day.status !== "scheduled") {
+      current = 0;
+    }
+  }
+  return best;
+}
+
+function habitHealthStatus(template: CustomQuestTemplate, days: HabitProgressDay[], today: string): HabitHealthStatus {
+  if (!template.isActive) return "paused";
+  const todayDay = days.find((day) => day.date === today);
+  if (todayDay?.status === "active") return "at_risk";
+  const recentDue = [...days].reverse().find((day) => day.due && day.date <= today);
+  if (recentDue?.status === "missed" || recentDue?.status === "skipped") return "broken";
+  return "stable";
+}
+
+function nextHabitDueDate(template: CustomQuestTemplate, today: string, todayQuest: Quest | null) {
+  if (!template.isActive || template.deletedAt) return null;
+  if (todayQuest?.status === "active") return today;
+  for (let offset = todayQuest?.status === "completed" ? 1 : 0; offset <= 45; offset += 1) {
+    const date = addDaysToDateString(today, offset);
+    if (shouldCreateCustomQuestToday(template, date)) return date;
+  }
+  return null;
 }
 
 function isMissingTimezoneColumn(error: unknown) {

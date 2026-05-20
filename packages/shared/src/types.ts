@@ -120,6 +120,33 @@ export interface CustomQuestInput {
   isActive?: boolean;
 }
 
+export type HabitDayStatus = "completed" | "skipped" | "missed" | "active" | "scheduled";
+export type HabitHealthStatus = "stable" | "at_risk" | "broken" | "paused";
+
+export interface HabitProgressDay {
+  date: string;
+  due: boolean;
+  status: HabitDayStatus;
+  questId: string | null;
+  xp: number;
+}
+
+export interface CustomQuestProgress {
+  template: CustomQuestTemplate;
+  currentStreak: number;
+  bestStreak: number;
+  scheduledCount: number;
+  completedCount: number;
+  skippedCount: number;
+  missedCount: number;
+  completionRate: number;
+  healthStatus: HabitHealthStatus;
+  lastCompletedAt: string | null;
+  nextDueDate: string | null;
+  todayQuest: Quest | null;
+  calendar: HabitProgressDay[];
+}
+
 export interface QuestTemplate {
   id?: string;
   title: string;

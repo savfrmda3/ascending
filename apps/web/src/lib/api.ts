@@ -2,6 +2,7 @@ import type {
   AuthResponse,
   BossProgressResult,
   CustomQuestInput,
+  CustomQuestProgress,
   CustomQuestTemplate,
   DashboardSummary,
   ProgressHistory,
@@ -80,6 +81,10 @@ export function updateSettings(input: Partial<UserSettings>) {
 
 export function getCustomQuests() {
   return request<CustomQuestTemplate[]>("/api/custom-quests");
+}
+
+export function getCustomQuestProgress() {
+  return request<CustomQuestProgress[]>("/api/custom-quests/progress");
 }
 
 export function createCustomQuest(input: CustomQuestInput) {
@@ -272,6 +277,7 @@ function translateApiMessage(message?: string) {
     "Unable to update settings": "Не удалось сохранить настройки",
     "Custom quests storage is not ready": "Хранилище пользовательских квестов еще не обновлено. Примени новую миграцию Supabase.",
     "Unable to load custom quests": "Не удалось загрузить мои квесты",
+    "Unable to load custom quest progress": "Не удалось загрузить прогресс привычек",
     "Unable to create custom quest": "Не удалось создать привычку",
     "Unable to update custom quest": "Не удалось обновить привычку",
     "Unable to delete custom quest": "Не удалось архивировать привычку",

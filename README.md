@@ -158,6 +158,8 @@ Users can create their own recurring quests in the Mini App. A custom quest temp
 
 Apply `20260520000000_custom_quest_habits.sql` before enabling this in production. It adds `custom_quest_templates`, extends `quests.type` with `custom`, and links daily custom quest instances through `custom_template_id`.
 
+The Mini App also shows per-habit progress: current streak, best streak, completion rate, missed/skipped count, next due date, and a compact recent calendar. This progress is derived from `quests`, so completed history remains the source of truth and no extra table is required.
+
 ## Main Endpoints
 
 - `GET /api/health`
@@ -176,6 +178,8 @@ Apply `20260520000000_custom_quest_habits.sql` before enabling this in productio
 - `GET /api/achievements`
 - `GET /api/progress/history`
 - `GET /api/custom-quests`
+- `GET /api/custom-quests/progress`
+- `GET /api/custom-quests/:id/progress`
 - `POST /api/custom-quests`
 - `PATCH /api/custom-quests/:id`
 - `DELETE /api/custom-quests/:id`

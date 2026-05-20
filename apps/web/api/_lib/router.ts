@@ -176,6 +176,10 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
     return { data: await hunterService.getCustomQuests(session.userId) };
   }
 
+  if (method === "GET" && path === "custom-quests/progress") {
+    return { data: await hunterService.getCustomQuestProgressList(session.userId) };
+  }
+
   if (method === "POST" && path === "custom-quests") {
     rateLimit(req, `custom-quests:create:${session.userId}`, 10, 60_000);
     const body = customQuestTemplateSchema.parse(await readBody(req));
@@ -187,6 +191,11 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
     const params = uuidParamSchema.parse({ id: segments[1] });
     const body = customQuestTemplateUpdateSchema.parse(await readBody(req));
     return { data: await hunterService.updateCustomQuest(session.userId, params.id, body) };
+  }
+
+  if (segments[0] === "custom-quests" && segments[1] && segments[2] === "progress" && method === "GET") {
+    const params = uuidParamSchema.parse({ id: segments[1] });
+    return { data: await hunterService.getCustomQuestProgress(session.userId, params.id) };
   }
 
   if (segments[0] === "custom-quests" && segments[1] && segments[2] === "disable" && method === "POST") {
