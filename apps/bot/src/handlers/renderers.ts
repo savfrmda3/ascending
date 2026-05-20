@@ -3,7 +3,6 @@ import {
   xpToNextLevel,
   type HunterProfile,
   type Quest,
-  type SystemsOverview,
   type UserStats,
   type WeeklyBoss
 } from "@system-hunter/shared";
@@ -151,29 +150,6 @@ export function renderBossVictory(boss: WeeklyBoss, profile: HunterProfile) {
   ].join("\n");
 }
 
-export function renderSystems(systems: SystemsOverview) {
-  const unlocked = systems.skills.nodes.filter((node) => node.unlocked).length;
-  const ownedItems = systems.inventory.items.reduce((total, item) => total + item.quantity, 0);
-  const squadLine = systems.squad
-    ? `Отряд: <b>${escapeHtml(systems.squad.name)}</b> / ${systems.squad.memberCount} участников`
-    : "Отряд: <b>не создан</b>";
-  const seasonLine = systems.season
-    ? `Сезон: <b>${escapeHtml(systems.season.title)}</b> / ${systems.season.questsCompleted} квестов`
-    : "Сезон: <b>нет активного сезона</b>";
-
-  return [
-    "<b>РАСШИРЕННЫЕ СИСТЕМЫ</b>",
-    "",
-    `Очки навыков: <b>${systems.skills.availablePoints}</b> свободно / ${systems.skills.totalPoints} всего`,
-    `Навыки: <b>${unlocked}</b> / ${systems.skills.nodes.length} открыто`,
-    `Инвентарь: <b>${ownedItems}</b> предметов`,
-    seasonLine,
-    squadLine,
-    "",
-    "Управление навыками, инвентарём, сезонами и отрядом доступно в Mini App."
-  ].join("\n");
-}
-
 export function renderSettingsHelp() {
   return [
     "<b>НАСТРОЙКИ</b>",
@@ -195,7 +171,6 @@ export function renderHelp() {
     "/quests - квесты на сегодня",
     "/stats - характеристики",
     "/boss - босс недели",
-    "/systems - навыки, инвентарь и сезон",
     "/settings - настройки",
     "/help - помощь",
     "",

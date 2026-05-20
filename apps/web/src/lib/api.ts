@@ -8,9 +8,7 @@ import type {
   ProgressHistory,
   Quest,
   QuestCompletionResult,
-  SkillUnlockResult,
-  SquadSummary,
-  SystemsOverview,
+  UserNotificationSettings,
   UserSettings
 } from "@system-hunter/shared";
 
@@ -48,32 +46,19 @@ export function getProgressHistory() {
   return request<ProgressHistory>("/api/progress/history");
 }
 
-export function getSystemsOverview() {
-  return request<SystemsOverview>("/api/systems");
-}
-
-export function unlockSkill(key: string) {
-  return request<SkillUnlockResult>(`/api/skills/${key}/unlock`, {
-    method: "POST"
-  });
-}
-
-export function createSquad(name: string) {
-  return request<SquadSummary>("/api/squad/create", {
-    method: "POST",
-    body: JSON.stringify({ name })
-  });
-}
-
-export function joinSquad(code: string) {
-  return request<SquadSummary>("/api/squad/join", {
-    method: "POST",
-    body: JSON.stringify({ code })
-  });
-}
-
 export function updateSettings(input: Partial<UserSettings>) {
   return request<UserSettings>("/api/settings", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function getNotificationSettings() {
+  return request<UserNotificationSettings>("/api/notification-settings");
+}
+
+export function updateNotificationSettings(input: Partial<UserNotificationSettings>) {
+  return request<UserNotificationSettings>("/api/notification-settings", {
     method: "POST",
     body: JSON.stringify(input)
   });
@@ -267,28 +252,9 @@ function translateApiMessage(message?: string) {
     "Unable to unlock achievement": "Не удалось открыть достижение",
     "Unable to load progress history": "Не удалось загрузить историю прогресса",
     "Unable to load recent quests": "Не удалось загрузить последние квесты",
-    "Expansion systems storage is not ready": "Хранилище новых систем еще не обновлено. Примени последнюю миграцию Supabase.",
-    "Skill node not found": "Навык не найден",
-    "Skill already unlocked": "Навык уже открыт",
-    "Skill requirements are not met": "Требования навыка пока не выполнены",
-    "Not enough skill points": "Недостаточно очков навыков",
-    "Unable to unlock skill": "Не удалось открыть навык",
     "Not enough energy to generate quest": "Недостаточно энергии для генерации квеста",
     "Not enough energy for hard quest": "Недостаточно энергии для сложного квеста",
     "Unable to update vitals": "Не удалось обновить HP/Energy",
-    "Unable to load skill tree": "Не удалось загрузить дерево навыков",
-    "Unable to load inventory": "Не удалось загрузить инвентарь",
-    "Unable to load inventory catalog": "Не удалось загрузить каталог наград",
-    "Unable to load season": "Не удалось загрузить сезон",
-    "Unable to load season progress": "Не удалось загрузить прогресс сезона",
-    "Unable to update season progress": "Не удалось обновить прогресс сезона",
-    "Unable to load squad": "Не удалось загрузить отряд",
-    "Unable to create squad": "Не удалось создать отряд",
-    "Unable to join created squad": "Не удалось вступить в созданный отряд",
-    "Unable to join squad": "Не удалось вступить в отряд",
-    "User already has a squad": "Ты уже состоишь в отряде",
-    "Squad not found": "Отряд не найден",
-    "Unable to load admin overview": "Не удалось загрузить админ-сводку",
     "Achievement unlocked.": "Достижение открыто.",
     "Invalid JSON body": "Некорректный запрос к серверу",
     "Request body is too large": "Запрос слишком большой",
@@ -297,6 +263,10 @@ function translateApiMessage(message?: string) {
     "Unable to load settings": "Не удалось загрузить настройки",
     "Unable to create settings": "Не удалось создать настройки",
     "Unable to update settings": "Не удалось сохранить настройки",
+    "Notification settings storage is not ready": "Хранилище уведомлений ещё не обновлено. Примени новую миграцию Supabase.",
+    "Unable to load notification settings": "Не удалось загрузить настройки уведомлений",
+    "Unable to create notification settings": "Не удалось создать настройки уведомлений",
+    "Unable to update notification settings": "Не удалось сохранить настройки уведомлений",
     "Custom quests storage is not ready": "Хранилище пользовательских квестов еще не обновлено. Примени новую миграцию Supabase.",
     "Unable to load custom quests": "Не удалось загрузить мои квесты",
     "Unable to load custom quest progress": "Не удалось загрузить прогресс привычек",

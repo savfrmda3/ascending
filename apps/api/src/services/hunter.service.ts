@@ -410,7 +410,6 @@ export class HunterService {
       .eq("id", userId);
 
     const bossProgress = await this.syncBossProgress(userId);
-    await this.syncSeasonProgress(userId, { questXp: quest.xp_reward });
     const unlockedAchievements = [
       ...(await this.evaluateAchievements(userId, {
         leveledUp: award.leveledUp
@@ -1367,8 +1366,6 @@ export class HunterService {
         updatedBoss = toBoss(data as WeeklyBossRow);
         if (victory) {
           await this.awardUser(userId, currentBoss.xpReward, currentBoss.statRewardKey, currentBoss.statRewardValue, "Охотник фокуса");
-          await this.syncSeasonProgress(userId, { bossDefeated: true });
-          await this.awardInventoryItem(userId, "focus_booster", 1);
           unlockedAchievements = await this.evaluateAchievements(userId, { bossDefeated: true });
         }
       } else {
@@ -1713,7 +1710,6 @@ export class HunterService {
 
     const { data, error } = await supabase.from("achievements").insert(rows).select("*");
     if (error) throw badRequest("Unable to unlock achievement", error);
-    await Promise.all(rows.map((row) => this.awardAchievementItem(userId, row.key)));
     return ((data ?? []) as AchievementRow[]).map(toAchievement);
   }
 

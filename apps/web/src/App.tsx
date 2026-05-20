@@ -11,7 +11,6 @@ import {
   HeartPulse,
   LayoutDashboard,
   ListChecks,
-  Package,
   MessageCircle,
   Shield,
   Sparkles,
@@ -36,7 +35,7 @@ import {
   type QuestCompletionResult,
   type RecurrenceType,
   type StatKey,
-  type SystemsOverview,
+  type UserNotificationSettings,
   type UserSettings,
   type Weekday
 } from "@system-hunter/shared";
@@ -44,7 +43,6 @@ import { Modal, Panel, PrimaryButton, ProgressBar, Metric } from "./components/u
 import {
   authenticateTelegram,
   completeQuest,
-  createSquad,
   createCustomQuest,
   deleteCustomQuest,
   deleteTodayCustomQuest,
@@ -54,20 +52,19 @@ import {
   getCustomQuests,
   getCustomQuestProgress,
   getDashboard,
+  getNotificationSettings,
   getProgressHistory,
-  getSystemsOverview,
-  joinSquad,
   replaceQuest,
   cancelQuest,
   skipQuest,
   startQuest,
-  unlockSkill,
   updateCustomQuest,
+  updateNotificationSettings,
   updateSettings
 } from "./lib/api.js";
 import { demoDashboard, demoProgressHistory } from "./lib/demo.js";
 
-type View = "dashboard" | "quests" | "activeQuest" | "stats" | "boss" | "profile" | "settings" | "progress" | "systems";
+type View = "dashboard" | "quests" | "activeQuest" | "progress" | "settings";
 type AppModal =
   | { type: "quest"; result: QuestCompletionResult }
   | { type: "boss"; result: BossProgressResult }
@@ -77,9 +74,7 @@ type AppModal =
 const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }> = [
   { id: "dashboard", label: "Главная", icon: LayoutDashboard },
   { id: "quests", label: "Квесты", icon: ListChecks },
-  { id: "stats", label: "Статы", icon: BarChart3 },
-  { id: "boss", label: "Босс", icon: Swords },
-  { id: "profile", label: "Профиль", icon: User }
+  { id: "progress", label: "Прогресс", icon: BarChart3 }
 ];
 
 const statusStats: Array<{ key: StatKey; icon: typeof LayoutDashboard }> = [
@@ -285,6 +280,15 @@ function questReason(quest: Pick<Quest, "reason" | "category" | "difficulty">) {
   return `Выбран для прокачки ${CATEGORY_LABELS_RU[quest.category].toLowerCase()} и баланса ${DIFFICULTY_LABELS_RU[quest.difficulty].toLowerCase()} нагрузки.`;
 }
 
+function recommendedReason(quest: Quest, dashboard: DashboardSummary) {
+  if (quest.category === "focus" && dashboard.boss?.status === "active") {
+    return "Сегодня фокус усиливает прогресс испытания недели.";
+  }
+  const completedSameCategory = dashboard.todayQuests.filter((item) => item.category === quest.category && item.status === "completed").length;
+  if (completedSameCategory === 0) return `Сегодня мало прогресса по направлению: ${CATEGORY_LABELS_RU[quest.category]}.`;
+  return `${CATEGORY_LABELS_RU[quest.category]} / ${DIFFICULTY_LABELS_RU[quest.difficulty]} / +${quest.xpReward} XP`;
+}
+
 function displayBossText(text: string) {
   return translateKnownText(text, BOSS_TEXT_RU);
 }
@@ -338,16 +342,40 @@ function hapticNotify(type: "success" | "warning" | "error") {
   window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred(type);
 }
 
+function demoNotificationSettings(): UserNotificationSettings {
+  const now = new Date().toISOString();
+  return {
+    id: "demo-notification-settings",
+    userId: demoDashboard.profile.id,
+    morningEnabled: true,
+    morningTime: "09:00",
+    eveningEnabled: true,
+    eveningTime: "20:00",
+    sleepEnabled: false,
+    bedtime: "23:30",
+    sleepRemindBeforeMinutes: 45,
+    questRemindersEnabled: false,
+    activeQuestRemindersEnabled: false,
+    bossRemindersEnabled: false,
+    streakWarningEnabled: false,
+    progressNotificationsEnabled: true,
+    quietHoursStart: "22:30",
+    quietHoursEnd: "08:00",
+    maxDailyNotifications: 4,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
 export function App() {
   const [view, setView] = useState<View>("dashboard");
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
   const [progressHistory, setProgressHistory] = useState<ProgressHistory | null>(null);
   const [progressLoading, setProgressLoading] = useState(false);
-  const [systems, setSystems] = useState<SystemsOverview | null>(null);
-  const [systemsLoading, setSystemsLoading] = useState(false);
   const [customQuests, setCustomQuests] = useState<CustomQuestTemplate[]>([]);
   const [customQuestProgress, setCustomQuestProgress] = useState<CustomQuestProgress[]>([]);
   const [customQuestsLoading, setCustomQuestsLoading] = useState(false);
+  const [notificationSettings, setNotificationSettings] = useState<UserNotificationSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -362,11 +390,14 @@ export function App() {
         if (!initData) {
           setDemoMode(true);
           setDashboard(demoDashboard);
+          setNotificationSettings(demoNotificationSettings());
           return;
         }
 
         await authenticateTelegram(initData);
-        setDashboard(await getDashboard());
+        const [dashboardData, notificationData] = await Promise.all([getDashboard(), getNotificationSettings()]);
+        setDashboard(dashboardData);
+        setNotificationSettings(notificationData);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Не удалось запустить System Hunter");
       } finally {
@@ -383,12 +414,7 @@ export function App() {
   }, [view, demoMode, dashboard?.profile.id]);
 
   useEffect(() => {
-    if (view !== "systems" || !dashboard) return;
-    void loadSystemsOverview();
-  }, [view, demoMode, dashboard?.profile.id]);
-
-  useEffect(() => {
-    if (view !== "quests" || !dashboard) return;
+    if ((view !== "quests" && view !== "progress") || !dashboard) return;
     void loadCustomQuests();
   }, [view, demoMode, dashboard?.profile.id]);
 
@@ -409,7 +435,6 @@ export function App() {
     if (demoMode) return;
     setDashboard(await getDashboard());
     setProgressHistory(null);
-    setSystems(null);
     setCustomQuests([]);
     setCustomQuestProgress([]);
   }
@@ -427,22 +452,6 @@ export function App() {
       setError(caught instanceof Error ? caught.message : "Не удалось загрузить историю прогресса");
     } finally {
       setProgressLoading(false);
-    }
-  }
-
-  async function loadSystemsOverview() {
-    setSystemsLoading(true);
-    try {
-      if (demoMode) {
-        setSystems(buildDemoSystems(dashboard ?? demoDashboard));
-        return;
-      }
-
-      setSystems(await getSystemsOverview());
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Не удалось загрузить системные модули");
-    } finally {
-      setSystemsLoading(false);
     }
   }
 
@@ -466,7 +475,7 @@ export function App() {
     }
   }
 
-  async function onSaveSettings(input: Partial<UserSettings>) {
+  async function onSaveSettings(input: Partial<UserSettings>, notificationsInput?: Partial<UserNotificationSettings>) {
     setBusyId("settings");
     try {
       if (demoMode) {
@@ -482,12 +491,27 @@ export function App() {
               }
             : current
         );
+        if (notificationsInput) {
+          setNotificationSettings((current) =>
+            current
+              ? {
+                  ...current,
+                  ...notificationsInput,
+                  updatedAt: new Date().toISOString()
+                }
+              : current
+          );
+        }
         setModal({ type: "notice", title: "НАСТРОЙКИ ДЕМО", body: "Настройки изменены только в текущем демо-сеансе." });
         setView("dashboard");
         return;
       }
 
-      await updateSettings(input);
+      const [updatedNotifications] = await Promise.all([
+        notificationsInput ? updateNotificationSettings(notificationsInput) : Promise.resolve(notificationSettings),
+        updateSettings(input)
+      ]);
+      if (updatedNotifications) setNotificationSettings(updatedNotifications);
       await refresh();
       setModal({ type: "notice", title: "НАСТРОЙКИ СОХРАНЕНЫ", body: "Система обновит подбор следующих квестов с учетом твоего профиля." });
       setView("dashboard");
@@ -607,64 +631,6 @@ export function App() {
       setModal({ type: "notice", title: "КВЕСТ УДАЛЕН", body: "Удален только сегодняшний активный экземпляр. История привычки не затронута." });
     } catch (caught) {
       setModal({ type: "notice", title: "КВЕСТ НЕ УДАЛЕН", body: caught instanceof Error ? caught.message : "Не удалось удалить сегодняшний квест" });
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function onUnlockSkill(key: string) {
-    setBusyId(key);
-    try {
-      if (demoMode) {
-        setSystems((current) => current ? unlockSkillInDemo(current, key) : current);
-        setModal({ type: "notice", title: "НАВЫК ДЕМО", body: "Навык открыт только в текущем демо-сеансе." });
-        return;
-      }
-
-      const result = await unlockSkill(key);
-      setSystems((current) => current ? { ...current, skills: result.skills } : current);
-      await refresh();
-      setModal({ type: "notice", title: "НАВЫК ОТКРЫТ", body: "Дерево навыков обновлено, характеристика усилена." });
-    } catch (caught) {
-      setModal({ type: "notice", title: "НАВЫК НЕ ОТКРЫТ", body: caught instanceof Error ? caught.message : "Не удалось открыть навык" });
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function onCreateSquad(name: string) {
-    setBusyId("squad");
-    try {
-      if (demoMode) {
-        setSystems((current) => current ? { ...current, squad: demoSquad(name) } : current);
-        setModal({ type: "notice", title: "ОТРЯД ДЕМО", body: "Отряд создан только в демо-режиме." });
-        return;
-      }
-
-      const squad = await createSquad(name);
-      setSystems((current) => current ? { ...current, squad } : current);
-      setModal({ type: "notice", title: "ОТРЯД СОЗДАН", body: `Код отряда: ${squad.code}` });
-    } catch (caught) {
-      setModal({ type: "notice", title: "ОТРЯД НЕ СОЗДАН", body: caught instanceof Error ? caught.message : "Не удалось создать отряд" });
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function onJoinSquad(code: string) {
-    setBusyId("squad");
-    try {
-      if (demoMode) {
-        setSystems((current) => current ? { ...current, squad: demoSquad("Демо-отряд", code) } : current);
-        setModal({ type: "notice", title: "ОТРЯД ДЕМО", body: "Вступление работает только в текущем демо-сеансе." });
-        return;
-      }
-
-      const squad = await joinSquad(code);
-      setSystems((current) => current ? { ...current, squad } : current);
-      setModal({ type: "notice", title: "ОТРЯД НАЙДЕН", body: `Ты присоединился к ${squad.name}.` });
-    } catch (caught) {
-      setModal({ type: "notice", title: "ВСТУПЛЕНИЕ НЕ УДАЛОСЬ", body: caught instanceof Error ? caught.message : "Не удалось вступить в отряд" });
     } finally {
       setBusyId(null);
     }
@@ -1172,102 +1138,6 @@ export function App() {
     return streak;
   }
 
-  function buildDemoSystems(current: DashboardSummary): SystemsOverview {
-    const unlockedKeys = new Set(["focus_i", "discipline_i"]);
-    const nodes: SystemsOverview["skills"]["nodes"] = [
-      ["focus", "Focus"],
-      ["discipline", "Discipline"],
-      ["vitality", "Vitality"],
-      ["charisma", "Charisma"]
-    ].flatMap(([stat, title]) =>
-      ([1, 2, 3] as const).map((tier) => {
-        const key = `${stat}_${"i".repeat(tier)}`;
-        const unlocked = unlockedKeys.has(key);
-        return {
-          key,
-          title: `${title} ${"I".repeat(tier)}`,
-          description: `Демо-узел прокачки ${STAT_LABELS_RU[stat as StatKey].label}.`,
-          statKey: stat as StatKey,
-          tier,
-          cost: tier,
-          bonusText: `+${tier} ${STAT_LABELS_RU[stat as StatKey].short} при открытии`,
-          unlocked,
-          unlockedAt: unlocked ? new Date().toISOString() : null,
-          canUnlock: !unlocked && tier === 1
-        };
-      })
-    );
-
-    return {
-      skills: {
-        totalPoints: Math.floor(current.profile.level / 2),
-        spentPoints: 2,
-        availablePoints: Math.max(0, Math.floor(current.profile.level / 2) - 2),
-        nodes
-      },
-      inventory: {
-        catalog: [
-          { key: "streak_shield", title: "Щит серии", description: "Защита серии.", type: "shield", rarity: "rare", effectKey: "streak_protection", effectValue: 1 },
-          { key: "focus_booster", title: "Фокус-ускоритель", description: "Награда босса.", type: "booster", rarity: "epic", effectKey: "focus_bonus", effectValue: 1 },
-          { key: "iron_frame", title: "Железная рамка", description: "Косметическая рамка.", type: "frame", rarity: "common", effectKey: null, effectValue: 0 }
-        ],
-        items: [
-          {
-            item: { key: "focus_booster", title: "Фокус-ускоритель", description: "Награда босса.", type: "booster", rarity: "epic", effectKey: "focus_bonus", effectValue: 1 },
-            quantity: 1,
-            acquiredAt: new Date().toISOString()
-          }
-        ]
-      },
-      season: {
-        key: "awakening-2026-05",
-        title: "Сезон пробуждения",
-        description: "Демо-сезон для просмотра сезонного прогресса.",
-        startsAt: current.boss?.startsAt ?? new Date().toISOString(),
-        endsAt: current.boss?.endsAt ?? new Date().toISOString(),
-        bossName: "Архонт инерции",
-        rewardTitle: "Пробужденный охотник",
-        questsCompleted: current.profile.completedQuestsCount,
-        bossesDefeated: current.boss?.status === "completed" ? 1 : 0,
-        xp: current.profile.totalXp,
-        rewardClaimed: false
-      },
-      squad: null,
-      admin: {
-        usersCount: 128,
-        activeQuestsToday: 342,
-        completedQuestsToday: 219,
-        templatesCount: 48,
-        activeBossesCount: 91
-      }
-    };
-  }
-
-  function unlockSkillInDemo(current: SystemsOverview, key: string): SystemsOverview {
-    return {
-      ...current,
-      skills: {
-        ...current.skills,
-        availablePoints: Math.max(0, current.skills.availablePoints - 1),
-        spentPoints: current.skills.spentPoints + 1,
-        nodes: current.skills.nodes.map((node) =>
-          node.key === key ? { ...node, unlocked: true, unlockedAt: new Date().toISOString(), canUnlock: false } : node
-        )
-      }
-    };
-  }
-
-  function demoSquad(name: string, code = "DEMO2026"): SystemsOverview["squad"] {
-    return {
-      id: "demo-squad",
-      name: name.trim() || "Демо-отряд",
-      code: code.trim().toUpperCase() || "DEMO2026",
-      role: "owner",
-      memberCount: 1,
-      createdAt: new Date().toISOString()
-    };
-  }
-
   if (loading) {
     return <BootScreen label="СИСТЕМА ЗАГРУЖАЕТСЯ" />;
   }
@@ -1288,9 +1158,14 @@ export function App() {
             <p className="font-mono text-[10px] font-bold uppercase tracking-normal text-system-cyan">СИСТЕМА АКТИВНА</p>
             <h1 className="mt-0.5 font-mono text-xl font-black uppercase text-slate-50">System Hunter</h1>
           </div>
-          <div className="grid size-10 place-items-center border border-system-cyan/40 bg-system-cyan/10 text-system-cyan shadow-cyan">
+          <button
+            aria-label="Открыть настройки"
+            className="hud-button grid size-10 place-items-center border border-system-cyan/40 bg-system-cyan/10 text-system-cyan shadow-cyan transition active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-system-cyan"
+            onClick={() => setView("settings")}
+            type="button"
+          >
             <Sparkles size={18} />
-          </div>
+          </button>
         </header>
 
         {error ? (
@@ -1310,8 +1185,9 @@ export function App() {
             busy={busyId === "settings"}
             mode="onboarding"
             settings={dashboard.settings}
+            notificationSettings={notificationSettings ?? demoNotificationSettings()}
             onBack={() => setView("dashboard")}
-            onSave={(input) => onSaveSettings({ ...input, onboardingCompleted: true })}
+            onSave={(input, notificationsInput) => onSaveSettings({ ...input, onboardingCompleted: true }, notificationsInput)}
           />
         ) : (
           <>
@@ -1320,6 +1196,7 @@ export function App() {
                 dashboard={dashboard}
                 completedToday={completedToday}
                 activeQuest={inProgressQuest}
+                onStartQuest={onStartQuest}
                 onView={setView}
                 demoMode={demoMode}
               />
@@ -1355,34 +1232,23 @@ export function App() {
                 onCompleteQuest={onCompleteQuest}
               />
             ) : null}
-            {view === "stats" ? <StatsView dashboard={dashboard} /> : null}
-            {view === "boss" ? <BossView dashboard={dashboard} onView={setView} /> : null}
             {view === "progress" ? (
               <ProgressView
+                dashboard={dashboard}
+                customQuestProgress={customQuestProgress}
                 history={progressHistory}
                 loading={progressLoading}
                 onRefresh={() => void loadProgressHistory()}
-                onView={setView}
+                onOpenSettings={() => setView("settings")}
               />
             ) : null}
-            {view === "systems" ? (
-              <SystemsView
-                busyId={busyId}
-                systems={systems}
-                loading={systemsLoading}
-                onCreateSquad={onCreateSquad}
-                onJoinSquad={onJoinSquad}
-                onRefresh={() => void loadSystemsOverview()}
-                onUnlockSkill={onUnlockSkill}
-              />
-            ) : null}
-            {view === "profile" ? <ProfileView dashboard={dashboard} onOpenSettings={() => setView("settings")} onView={setView} /> : null}
             {view === "settings" ? (
               <SettingsView
                 busy={busyId === "settings"}
                 mode="settings"
                 settings={dashboard.settings}
-                onBack={() => setView("profile")}
+                notificationSettings={notificationSettings ?? demoNotificationSettings()}
+                onBack={() => setView("progress")}
                 onSave={onSaveSettings}
               />
             ) : null}
@@ -1391,7 +1257,7 @@ export function App() {
       </main>
 
       {onboardingRequired ? null : <nav className="nav-hud fixed inset-x-0 bottom-0 z-40 border-t px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl">
-        <div className="mx-auto grid max-w-[414px] grid-cols-5 gap-1">
+        <div className="mx-auto grid max-w-[414px] grid-cols-3 gap-1">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = view === item.id;
@@ -1465,12 +1331,14 @@ function DashboardView({
   dashboard,
   completedToday,
   activeQuest,
+  onStartQuest,
   onView,
   demoMode
 }: {
   dashboard: DashboardSummary;
   completedToday: number;
   activeQuest: Quest | null;
+  onStartQuest: (quest: Quest) => void;
   onView: (view: View) => void;
   demoMode: boolean;
 }) {
@@ -1575,15 +1443,28 @@ function DashboardView({
             <h2 className="font-bold">{nextQuest ? displayQuestTitle(nextQuest) : "Дневной протокол закрыт"}</h2>
             <p className="mt-1 text-sm text-system-muted">
               {nextQuest
-                ? `${CATEGORY_LABELS_RU[nextQuest.category]} / ${DIFFICULTY_LABELS_RU[nextQuest.difficulty]} / +${nextQuest.xpReward} XP`
+                ? `${recommendedReason(nextQuest, dashboard)}`
                 : "Можно проверить босса или восстановиться до следующего дня."}
             </p>
           </div>
-          <PrimaryButton onClick={() => onView(nextQuest ? "quests" : "boss")} variant="ghost">
-            {nextQuest ? "Открыть" : "Босс"}
+          <PrimaryButton onClick={() => nextQuest ? onStartQuest(nextQuest) : onView("progress")} variant={nextQuest ? "primary" : "ghost"}>
+            {nextQuest ? "Взять" : "Прогресс"}
           </PrimaryButton>
         </div>
       </Panel>
+
+      {boss ? (
+        <Panel className="border-system-danger/35 bg-system-danger/8">
+          <p className="font-mono text-xs font-bold uppercase text-system-muted">Испытание недели</p>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-bold">{displayBossText(boss.name)}</h2>
+              <p className="mt-1 text-sm text-system-muted">Прогресс: {boss.progress}/{boss.target}</p>
+            </div>
+            <PrimaryButton onClick={() => onView("progress")} variant="ghost">Детали</PrimaryButton>
+          </div>
+        </Panel>
+      ) : null}
 
       <Panel className="border-system-cyan/40 bg-system-cyan/8">
         <div className="flex items-start gap-3">
@@ -1597,13 +1478,9 @@ function DashboardView({
         </div>
       </Panel>
 
-      <div className="grid grid-cols-2 gap-2">
-        <PrimaryButton onClick={() => onView("quests")}>К квестам</PrimaryButton>
-        <PrimaryButton onClick={() => onView("stats")} variant="ghost">Статы</PrimaryButton>
-        <PrimaryButton onClick={() => onView("boss")} variant="ghost">Босс</PrimaryButton>
-        <PrimaryButton onClick={() => onView("progress")} variant="ghost">История</PrimaryButton>
-        <PrimaryButton onClick={() => onView("systems")} variant="ghost">Системы</PrimaryButton>
-      </div>
+      <PrimaryButton onClick={() => activeQuest ? onView("activeQuest") : onView("quests")}>
+        {activeQuest ? "Продолжить квест" : "Открыть квесты"}
+      </PrimaryButton>
     </div>
   );
 }
@@ -1656,6 +1533,7 @@ function QuestsView({
 }) {
   const [formMode, setFormMode] = useState<"closed" | "create" | "edit">("closed");
   const [editingTemplate, setEditingTemplate] = useState<CustomQuestTemplate | null>(null);
+  const [openQuestMenuId, setOpenQuestMenuId] = useState<string | null>(null);
   const progressByTemplate = new Map(customQuestProgress.map((item) => [item.template.id, item]));
 
   function startCreate() {
@@ -1730,7 +1608,7 @@ function QuestsView({
             <p className="font-mono text-xs text-system-muted">+{quest.statRewardValue} {STAT_LABELS_RU[quest.statRewardKey].short}</p>
           </div>
           <p className="mt-2 text-xs leading-relaxed text-system-muted">{questReason(quest)}</p>
-          <div className="mt-3 grid grid-cols-3 gap-2">
+          <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
             {quest.status === "in_progress" ? (
               <PrimaryButton disabled={busyId === quest.id} onClick={() => onOpenActiveQuest(quest)}>
                 Открыть
@@ -1743,6 +1621,17 @@ function QuestsView({
                 {quest.status === "completed" ? "Выполнено" : quest.status === "skipped" ? "Пропущен" : "Взять квест"}
               </PrimaryButton>
             )}
+            <button
+              aria-label="Дополнительные действия"
+              className="hud-button grid min-h-11 w-12 place-items-center border border-system-border bg-white/5 text-lg text-system-muted transition active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-system-cyan"
+              onClick={() => setOpenQuestMenuId((current) => current === quest.id ? null : quest.id)}
+              type="button"
+            >
+              ⋯
+            </button>
+          </div>
+          {openQuestMenuId === quest.id ? (
+            <div className="card-enter mt-2 grid grid-cols-2 gap-2">
             <PrimaryButton
               disabled={quest.status !== "active" || busyId === quest.id}
               onClick={() => onSkipQuest(quest)}
@@ -1757,15 +1646,16 @@ function QuestsView({
             >
               Заменить
             </PrimaryButton>
-          </div>
-          {quest.type === "custom" && (quest.status === "active" || quest.status === "skipped") ? (
-            <PrimaryButton
-              disabled={busyId === quest.id}
-              onClick={() => onDeleteTodayQuest(quest)}
-              variant="ghost"
-            >
-              Удалить только сегодня
-            </PrimaryButton>
+            {quest.type === "custom" && (quest.status === "active" || quest.status === "skipped") ? (
+              <PrimaryButton
+                disabled={busyId === quest.id}
+                onClick={() => onDeleteTodayQuest(quest)}
+                variant="ghost"
+              >
+                Удалить сегодня
+              </PrimaryButton>
+            ) : null}
+            </div>
           ) : null}
         </Panel>
       ))}
@@ -2196,15 +2086,17 @@ function BossView({
 
 function SettingsView({
   settings,
+  notificationSettings,
   busy,
   mode,
   onSave,
   onBack
 }: {
   settings: UserSettings;
+  notificationSettings: UserNotificationSettings;
   busy: boolean;
   mode: "onboarding" | "settings";
-  onSave: (input: Partial<UserSettings>) => void;
+  onSave: (input: Partial<UserSettings>, notificationsInput?: Partial<UserNotificationSettings>) => void;
   onBack: () => void;
 }) {
   const [draft, setDraft] = useState({
@@ -2215,6 +2107,23 @@ function SettingsView({
     sleepTime: settings.sleepTime ?? "23:30",
     allowPhysicalQuests: settings.allowPhysicalQuests,
     preferredCategories: settings.preferredCategories
+  });
+  const [notificationDraft, setNotificationDraft] = useState({
+    morningEnabled: notificationSettings.morningEnabled,
+    morningTime: notificationSettings.morningTime,
+    eveningEnabled: notificationSettings.eveningEnabled,
+    eveningTime: notificationSettings.eveningTime,
+    sleepEnabled: notificationSettings.sleepEnabled,
+    bedtime: notificationSettings.bedtime ?? settings.sleepTime ?? "23:30",
+    sleepRemindBeforeMinutes: notificationSettings.sleepRemindBeforeMinutes,
+    questRemindersEnabled: notificationSettings.questRemindersEnabled,
+    activeQuestRemindersEnabled: notificationSettings.activeQuestRemindersEnabled,
+    bossRemindersEnabled: notificationSettings.bossRemindersEnabled,
+    streakWarningEnabled: notificationSettings.streakWarningEnabled,
+    progressNotificationsEnabled: notificationSettings.progressNotificationsEnabled,
+    quietHoursStart: notificationSettings.quietHoursStart ?? "22:30",
+    quietHoursEnd: notificationSettings.quietHoursEnd ?? "08:00",
+    maxDailyNotifications: notificationSettings.maxDailyNotifications
   });
 
   function toggleCategory(category: Quest["category"]) {
@@ -2234,7 +2143,7 @@ function SettingsView({
       className="screen-enter space-y-4"
       onSubmit={(event) => {
         event.preventDefault();
-        onSave(draft);
+        onSave(draft, notificationDraft);
       }}
     >
       <ScreenTitle
@@ -2350,6 +2259,122 @@ function SettingsView({
         </div>
       </Panel>
 
+      <Panel className="border-system-cyan/35 bg-system-cyan/8">
+        <p className="font-mono text-xs font-bold uppercase text-system-cyan">Уведомления Системы</p>
+        <p className="mt-1 text-sm text-system-muted">
+          Личные сообщения от бота: без публичных рейтингов, только твой дневной протокол и контроль дисциплины.
+        </p>
+        <div className="mt-4 space-y-3">
+          <ToggleRow
+            checked={notificationDraft.morningEnabled}
+            label="Утренний протокол"
+            onChange={(checked) => setNotificationDraft((current) => ({ ...current, morningEnabled: checked }))}
+          >
+            <input
+              className="hud-input max-w-[120px]"
+              disabled={!notificationDraft.morningEnabled}
+              onChange={(event) => setNotificationDraft((current) => ({ ...current, morningTime: event.target.value }))}
+              type="time"
+              value={notificationDraft.morningTime}
+            />
+          </ToggleRow>
+          <ToggleRow
+            checked={notificationDraft.eveningEnabled}
+            label="Вечерний отчёт"
+            onChange={(checked) => setNotificationDraft((current) => ({ ...current, eveningEnabled: checked }))}
+          >
+            <input
+              className="hud-input max-w-[120px]"
+              disabled={!notificationDraft.eveningEnabled}
+              onChange={(event) => setNotificationDraft((current) => ({ ...current, eveningTime: event.target.value }))}
+              type="time"
+              value={notificationDraft.eveningTime}
+            />
+          </ToggleRow>
+          <ToggleRow
+            checked={notificationDraft.questRemindersEnabled}
+            label="Напоминания о незавершённых квестах"
+            onChange={(checked) => setNotificationDraft((current) => ({ ...current, questRemindersEnabled: checked }))}
+          />
+          <ToggleRow
+            checked={notificationDraft.activeQuestRemindersEnabled}
+            label="Активный квест в процессе"
+            onChange={(checked) => setNotificationDraft((current) => ({ ...current, activeQuestRemindersEnabled: checked }))}
+          />
+          <ToggleRow
+            checked={notificationDraft.bossRemindersEnabled}
+            label="Испытание недели"
+            onChange={(checked) => setNotificationDraft((current) => ({ ...current, bossRemindersEnabled: checked }))}
+          />
+          <ToggleRow
+            checked={notificationDraft.streakWarningEnabled}
+            label="Серия под угрозой"
+            onChange={(checked) => setNotificationDraft((current) => ({ ...current, streakWarningEnabled: checked }))}
+          />
+          <ToggleRow
+            checked={notificationDraft.progressNotificationsEnabled}
+            label="Повышения уровня и достижения"
+            onChange={(checked) => setNotificationDraft((current) => ({ ...current, progressNotificationsEnabled: checked }))}
+          />
+          <ToggleRow
+            checked={notificationDraft.sleepEnabled}
+            label="Ночной протокол"
+            onChange={(checked) => setNotificationDraft((current) => ({ ...current, sleepEnabled: checked }))}
+          >
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                className="hud-input"
+                disabled={!notificationDraft.sleepEnabled}
+                onChange={(event) => setNotificationDraft((current) => ({ ...current, bedtime: event.target.value }))}
+                type="time"
+                value={notificationDraft.bedtime}
+              />
+              <select
+                className="hud-input"
+                disabled={!notificationDraft.sleepEnabled}
+                onChange={(event) => setNotificationDraft((current) => ({ ...current, sleepRemindBeforeMinutes: Number(event.target.value) }))}
+                value={notificationDraft.sleepRemindBeforeMinutes}
+              >
+                <option value={30}>за 30 мин</option>
+                <option value={45}>за 45 мин</option>
+                <option value={60}>за 60 мин</option>
+              </select>
+            </div>
+          </ToggleRow>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-sm text-system-muted">
+              Тихо с
+              <input
+                className="hud-input mt-1"
+                onChange={(event) => setNotificationDraft((current) => ({ ...current, quietHoursStart: event.target.value }))}
+                type="time"
+                value={notificationDraft.quietHoursStart}
+              />
+            </label>
+            <label className="text-sm text-system-muted">
+              Тихо до
+              <input
+                className="hud-input mt-1"
+                onChange={(event) => setNotificationDraft((current) => ({ ...current, quietHoursEnd: event.target.value }))}
+                type="time"
+                value={notificationDraft.quietHoursEnd}
+              />
+            </label>
+          </div>
+          <label className="block text-sm text-system-muted">
+            Лимит уведомлений в день: <span className="font-mono text-system-text">{notificationDraft.maxDailyNotifications}</span>
+            <input
+              className="mt-2 w-full accent-system-cyan"
+              max={8}
+              min={1}
+              onChange={(event) => setNotificationDraft((current) => ({ ...current, maxDailyNotifications: Number(event.target.value) }))}
+              type="range"
+              value={notificationDraft.maxDailyNotifications}
+            />
+          </label>
+        </div>
+      </Panel>
+
       <div className="grid grid-cols-2 gap-2">
         <PrimaryButton disabled={busy} type="submit">Сохранить</PrimaryButton>
         <PrimaryButton disabled={mode === "onboarding"} onClick={onBack} variant="ghost">Назад</PrimaryButton>
@@ -2358,21 +2383,141 @@ function SettingsView({
   );
 }
 
+function ToggleRow({
+  checked,
+  label,
+  children,
+  onChange
+}: {
+  checked: boolean;
+  label: string;
+  children?: ReactNode;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="border border-system-border bg-black/20 px-3 py-3">
+      <label className="flex items-center justify-between gap-3 text-sm text-system-text">
+        <span>{label}</span>
+        <input
+          checked={checked}
+          className="size-4 accent-system-cyan"
+          onChange={(event) => onChange(event.target.checked)}
+          type="checkbox"
+        />
+      </label>
+      {children ? <div className="mt-3">{children}</div> : null}
+    </div>
+  );
+}
+
 function ProgressView({
+  dashboard,
+  customQuestProgress,
   history,
   loading,
   onRefresh,
-  onView
+  onOpenSettings
 }: {
+  dashboard: DashboardSummary;
+  customQuestProgress: CustomQuestProgress[];
   history: ProgressHistory | null;
   loading: boolean;
   onRefresh: () => void;
-  onView: (view: View) => void;
+  onOpenSettings: () => void;
 }) {
+  const statValues = STAT_KEYS.map((key) => ({ key, value: dashboard.stats[key] }));
+  const weakestStat = statValues.reduce((weakest, item) => (item.value < weakest.value ? item : weakest), statValues[0]!);
+  const unlockedAchievements = dashboard.achievements.length;
+  const boss = dashboard.boss;
+  const progressOverview = (
+    <>
+      <Panel glow>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="font-mono text-xs font-bold uppercase text-system-cyan">Личный профиль</p>
+            <h2 className="mt-1 truncate text-xl font-black">@{dashboard.profile.username ?? "hunter"}</h2>
+            <p className="mt-1 text-sm text-system-muted">
+              Уровень {dashboard.profile.level} / Ранг {dashboard.profile.rank} / Серия {dashboard.profile.streak} дн.
+            </p>
+          </div>
+          <PrimaryButton onClick={onOpenSettings} variant="ghost">Настройки</PrimaryButton>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Metric label="Класс" value={displayClassName(dashboard.profile.className)} />
+          <Metric label="Титул" value={displayTitle(dashboard.profile.currentTitle)} accent="text-system-success" />
+          <Metric label="Всего XP" value={`${dashboard.profile.totalXp}`} accent="text-system-warning" />
+          <Metric label="Квесты" value={`${dashboard.profile.completedQuestsCount}`} accent="text-system-cyan" />
+        </div>
+      </Panel>
+
+      <Panel>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-mono text-xs font-bold uppercase text-system-muted">Характеристики</p>
+            <p className="mt-1 text-sm text-system-muted">Слабая зона сейчас: {STAT_LABELS_RU[weakestStat.key].label}</p>
+          </div>
+          <Shield className="text-system-cyan" size={20} />
+        </div>
+        <div className="mt-4 space-y-3">
+          {STAT_KEYS.map((key) => (
+            <div key={key}>
+              <div className="mb-1 flex justify-between font-mono text-[11px] text-system-muted">
+                <span>{STAT_LABELS_RU[key].short} / {STAT_LABELS_RU[key].label}</span>
+                <span>{dashboard.stats[key]}</span>
+              </div>
+              <ProgressBar value={dashboard.stats[key]} max={50} color={key === weakestStat.key ? "warning" : "cyan"} />
+            </div>
+          ))}
+        </div>
+      </Panel>
+
+      {boss ? (
+        <Panel className="border-system-danger/40 bg-system-danger/8">
+          <p className="font-mono text-xs font-bold uppercase text-system-muted">Испытание недели</p>
+          <h2 className="mt-1 text-lg font-black">{displayBossText(boss.name)}</h2>
+          <p className="mt-1 text-sm text-system-muted">{displayBossText(boss.objective)}</p>
+          <div className="mt-3">
+            <ProgressBar value={boss.progress} max={boss.target} color="danger" />
+            <p className="mt-2 text-right font-mono text-xs text-system-muted">{boss.progress} / {boss.target}</p>
+          </div>
+        </Panel>
+      ) : null}
+
+      <Panel>
+        <p className="font-mono text-xs font-bold uppercase text-system-muted">Привычки</p>
+        <div className="mt-3 space-y-2">
+          {customQuestProgress.length === 0 ? (
+            <p className="text-sm text-system-muted">У тебя пока нет своих привычек. Создай первый повторяющийся квест во вкладке “Квесты”.</p>
+          ) : (
+            customQuestProgress.slice(0, 4).map((progress) => (
+              <div key={progress.template.id} className="border border-system-border bg-black/20 px-3 py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="truncate text-sm font-bold">{progress.template.title}</p>
+                  <span className="font-mono text-xs text-system-cyan">{progress.currentStreak} дн.</span>
+                </div>
+                <p className="mt-1 text-xs text-system-muted">
+                  Выполнено: {progress.completedCount}, пропущено: {progress.skippedCount}, статус: {HABIT_HEALTH_LABELS_RU[progress.healthStatus]}
+                </p>
+              </div>
+            ))
+          )}
+        </div>
+      </Panel>
+
+      <Panel className="border-system-warning/35 bg-system-warning/8">
+        <div className="grid grid-cols-2 gap-2">
+          <Metric label="Достижения" value={`${unlockedAchievements}`} accent="text-system-warning" />
+          <Metric label="Серия" value={`${dashboard.profile.streak} дн.`} accent="text-system-success" />
+        </div>
+      </Panel>
+    </>
+  );
+
   if (loading || !history) {
     return (
       <div className="screen-enter space-y-4">
-        <ScreenTitle title="История прогресса" icon={<CalendarDays size={20} />} />
+        <ScreenTitle title="Прогресс" icon={<CalendarDays size={20} />} />
+        {progressOverview}
         <Panel glow>
           <p className="font-mono text-sm font-bold uppercase text-system-cyan">СИНХРОНИЗАЦИЯ</p>
           <p className="mt-2 text-sm text-system-muted">Система собирает историю квестов, недельный отчет и коллекцию достижений.</p>
@@ -2386,7 +2531,8 @@ function ProgressView({
 
   return (
     <div className="screen-enter space-y-4">
-      <ScreenTitle title="История прогресса" icon={<CalendarDays size={20} />} />
+      <ScreenTitle title="Прогресс" icon={<CalendarDays size={20} />} />
+      {progressOverview}
 
       <Panel glow>
         <div className="flex items-start justify-between gap-3">
@@ -2421,7 +2567,7 @@ function ProgressView({
             <p className="font-mono text-xs font-bold uppercase text-system-muted">Календарь 30 дней</p>
             <p className="mt-1 text-sm text-system-muted">Идеальных дней: {perfectDays}</p>
           </div>
-          <PrimaryButton onClick={() => onView("quests")} variant="ghost">Квесты</PrimaryButton>
+          <PrimaryButton onClick={onRefresh} variant="ghost">Обновить</PrimaryButton>
         </div>
         <div className="mt-4 grid grid-cols-10 gap-1.5">
           {history.calendar.map((day) => (
@@ -2498,255 +2644,6 @@ function ProgressView({
             </Panel>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-function SystemsView({
-  systems,
-  loading,
-  busyId,
-  onRefresh,
-  onUnlockSkill,
-  onCreateSquad,
-  onJoinSquad
-}: {
-  systems: SystemsOverview | null;
-  loading: boolean;
-  busyId: string | null;
-  onRefresh: () => void;
-  onUnlockSkill: (key: string) => void;
-  onCreateSquad: (name: string) => void;
-  onJoinSquad: (code: string) => void;
-}) {
-  const [squadName, setSquadName] = useState("Мой отряд");
-  const [squadCode, setSquadCode] = useState("");
-
-  if (loading || !systems) {
-    return (
-      <div className="screen-enter space-y-4">
-        <ScreenTitle title="Системы" icon={<Package size={20} />} />
-        <Panel glow>
-          <p className="font-mono text-sm font-bold uppercase text-system-cyan">МОДУЛИ ЗАГРУЖАЮТСЯ</p>
-          <p className="mt-2 text-sm text-system-muted">Система проверяет дерево навыков, инвентарь, сезон и отряд.</p>
-        </Panel>
-      </div>
-    );
-  }
-
-  return (
-    <div className="screen-enter space-y-4">
-      <ScreenTitle title="Системы" icon={<Package size={20} />} />
-
-      <Panel glow>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="font-mono text-xs font-bold uppercase text-system-cyan">Дерево навыков</p>
-            <h2 className="mt-1 text-lg font-black">{systems.skills.availablePoints} очк. доступно</h2>
-            <p className="mt-1 text-sm text-system-muted">
-              Всего: {systems.skills.totalPoints}, потрачено: {systems.skills.spentPoints}
-            </p>
-          </div>
-          <PrimaryButton onClick={onRefresh} variant="ghost">Обновить</PrimaryButton>
-        </div>
-        <div className="mt-4 space-y-2">
-          {systems.skills.nodes.map((node) => (
-            <div key={node.key} className={`border px-3 py-3 ${node.unlocked ? "border-system-success/45 bg-system-success/10" : "border-system-border bg-black/20"}`}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-mono text-xs font-bold uppercase text-system-muted">
-                    {STAT_LABELS_RU[node.statKey].short} / Ур. {node.tier} / {node.cost} ОН
-                  </p>
-                  <h3 className="mt-1 font-bold">{displaySkillTitle(node.title)}</h3>
-                  <p className="mt-1 text-sm text-system-muted">{node.description}</p>
-                  <p className="mt-1 text-xs text-system-cyan">{node.bonusText}</p>
-                </div>
-                <PrimaryButton disabled={!node.canUnlock || busyId === node.key} onClick={() => onUnlockSkill(node.key)} variant={node.unlocked ? "ghost" : "primary"}>
-                  {node.unlocked ? "Открыт" : "Открыть"}
-                </PrimaryButton>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Panel>
-
-      <Panel>
-        <p className="font-mono text-xs font-bold uppercase text-system-muted">Инвентарь и награды</p>
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          {systems.inventory.catalog.map((item) => {
-            const owned = systems.inventory.items.find((entry) => entry.item.key === item.key);
-            return (
-              <div className={`border px-3 py-3 ${owned ? rarityBorderClass(item.rarity) : "border-system-border opacity-70"}`} key={item.key}>
-                <p className={`font-mono text-[10px] uppercase ${owned ? "text-system-warning" : "text-system-muted"}`}>
-                  {RARITY_LABELS_RU[item.rarity]} / {item.type}
-                </p>
-                <h3 className="mt-1 text-sm font-bold">{item.title}</h3>
-                <p className="mt-1 text-xs text-system-muted">{item.description}</p>
-                <p className="mt-2 font-mono text-xs text-system-cyan">x{owned?.quantity ?? 0}</p>
-              </div>
-            );
-          })}
-        </div>
-      </Panel>
-
-      {systems.season ? (
-        <Panel className="border-system-warning/40 bg-system-warning/8">
-          <p className="font-mono text-xs font-bold uppercase text-system-muted">Сезон</p>
-          <h2 className="mt-1 text-lg font-black">{systems.season.title}</h2>
-          <p className="mt-1 text-sm text-system-muted">{systems.season.description}</p>
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            <Metric label="Квесты" value={`${systems.season.questsCompleted}`} accent="text-system-success" />
-            <Metric label="Боссы" value={`${systems.season.bossesDefeated}`} accent="text-system-danger" />
-            <Metric label="Сезон XP" value={`${systems.season.xp}`} accent="text-system-warning" />
-            <Metric label="Награда" value={systems.season.rewardTitle} />
-          </div>
-        </Panel>
-      ) : null}
-
-      <Panel>
-        <p className="font-mono text-xs font-bold uppercase text-system-muted">Отряд</p>
-        {systems.squad ? (
-          <div className="mt-2">
-            <h2 className="text-lg font-black">{systems.squad.name}</h2>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <Metric label="Код" value={systems.squad.code} accent="text-system-cyan" />
-              <Metric label="Участники" value={`${systems.squad.memberCount}`} />
-              <Metric label="Роль" value={systems.squad.role === "owner" ? "Лидер" : "Участник"} />
-              <Metric label="Создан" value={formatRuDate(systems.squad.createdAt)} />
-            </div>
-          </div>
-        ) : (
-          <div className="mt-3 space-y-3">
-            <label className="block text-sm text-system-muted">
-              Название отряда
-              <input
-                className="mt-1 w-full border border-system-border bg-black/30 px-3 py-2 text-system-text outline-none focus-visible:border-system-cyan"
-                onChange={(event) => setSquadName(event.target.value)}
-                value={squadName}
-              />
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <PrimaryButton disabled={busyId === "squad"} onClick={() => onCreateSquad(squadName)}>Создать</PrimaryButton>
-              <PrimaryButton disabled={busyId === "squad" || !squadCode.trim()} onClick={() => onJoinSquad(squadCode)} variant="ghost">Вступить</PrimaryButton>
-            </div>
-            <input
-              className="w-full border border-system-border bg-black/30 px-3 py-2 text-system-text outline-none focus-visible:border-system-cyan"
-              onChange={(event) => setSquadCode(event.target.value)}
-              placeholder="Код отряда"
-              value={squadCode}
-            />
-          </div>
-        )}
-      </Panel>
-
-      {systems.admin ? (
-        <Panel className="border-system-danger/40 bg-system-danger/8">
-          <p className="font-mono text-xs font-bold uppercase text-system-danger">Админ-сводка</p>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <Metric label="Пользователи" value={`${systems.admin.usersCount}`} />
-            <Metric label="Активные сегодня" value={`${systems.admin.activeQuestsToday}`} />
-            <Metric label="Закрыто сегодня" value={`${systems.admin.completedQuestsToday}`} accent="text-system-success" />
-            <Metric label="Шаблоны" value={`${systems.admin.templatesCount}`} />
-            <Metric label="Активные боссы" value={`${systems.admin.activeBossesCount}`} accent="text-system-danger" />
-          </div>
-        </Panel>
-      ) : null}
-    </div>
-  );
-}
-
-function ProfileView({
-  dashboard,
-  onOpenSettings,
-  onView
-}: {
-  dashboard: DashboardSummary;
-  onOpenSettings: () => void;
-  onView: (view: View) => void;
-}) {
-  return (
-    <div className="screen-enter space-y-4">
-      <ScreenTitle title="Профиль" icon={<User size={20} />} />
-      <Panel glow>
-        <div className="flex items-center gap-4">
-          <div className="grid size-16 place-items-center rounded-lg border border-system-cyan/40 bg-system-cyan/10 text-2xl font-black text-system-cyan">
-            {dashboard.profile.username?.slice(0, 1).toUpperCase() ?? "H"}
-          </div>
-          <div>
-            <h2 className="text-xl font-black">@{dashboard.profile.username ?? "неизвестно"}</h2>
-            <p className="mt-1 text-sm text-system-muted">Создан {formatRuDate(dashboard.profile.createdAt)}</p>
-          </div>
-        </div>
-        <div className="mt-5 grid grid-cols-2 gap-3">
-          <Metric label="Уровень" value={`${dashboard.profile.level}`} />
-          <Metric label="Ранг" value={dashboard.profile.rank} accent="text-system-warning" />
-          <Metric label="Класс" value={displayClassName(dashboard.profile.className)} />
-          <Metric label="Титул" value={displayTitle(dashboard.profile.currentTitle)} accent="text-system-success" />
-          <Metric label="Серия" value={`${dashboard.profile.streak} дн.`} />
-          <Metric label="Квесты" value={`${dashboard.profile.completedQuestsCount}`} />
-        </div>
-      </Panel>
-
-      <Panel>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="font-mono text-xs font-bold uppercase text-system-muted">Настройки системы</p>
-            <h2 className="mt-1 font-bold">{GOAL_LABELS_RU[dashboard.settings.primaryGoal]} / {DIFFICULTY_LABELS_RU[dashboard.settings.desiredDifficulty]}</h2>
-            <p className="mt-1 text-sm text-system-muted">
-              {dashboard.settings.questsPerDay} квестов в день, физические: {dashboard.settings.allowPhysicalQuests ? "включены" : "отключены"}
-            </p>
-          </div>
-          <PrimaryButton onClick={onOpenSettings} variant="ghost">Изменить</PrimaryButton>
-        </div>
-      </Panel>
-
-      <Panel className="border-system-cyan/35 bg-system-cyan/8">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="font-mono text-xs font-bold uppercase text-system-muted">Журнал прогресса</p>
-            <h2 className="mt-1 font-bold">История, календарь и закрытые достижения</h2>
-            <p className="mt-1 text-sm text-system-muted">Проверь динамику недели, последние действия и путь до следующих наград.</p>
-          </div>
-          <PrimaryButton onClick={() => onView("progress")} variant="ghost">Открыть</PrimaryButton>
-        </div>
-      </Panel>
-
-      <Panel className="border-system-purple/35 bg-system-purple/10">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="font-mono text-xs font-bold uppercase text-system-muted">Расширенные системы</p>
-            <h2 className="mt-1 font-bold">Навыки, инвентарь, сезон и отряд</h2>
-            <p className="mt-1 text-sm text-system-muted">Все новые RPG-модули собраны в одном системном терминале.</p>
-          </div>
-          <PrimaryButton onClick={() => onView("systems")} variant="ghost">Открыть</PrimaryButton>
-        </div>
-      </Panel>
-
-      <ScreenTitle title="Достижения" icon={<Trophy size={20} />} compact />
-      <div className="space-y-3">
-        {dashboard.achievements.length === 0 ? (
-          <Panel>
-            <p className="text-sm text-system-muted">Достижения пока не открыты.</p>
-          </Panel>
-        ) : (
-          dashboard.achievements.map((achievement) => {
-            const translated = displayAchievement(achievement);
-            return (
-              <Panel key={achievement.id} className="border-system-warning/40">
-                <div className="flex items-start gap-3">
-                  <div className="grid size-10 place-items-center rounded-md border border-system-warning/40 bg-system-warning/10 text-system-warning">
-                    <Trophy size={18} />
-                  </div>
-                  <div>
-                    <h3 className="font-bold">{translated.title}</h3>
-                    <p className="mt-1 text-sm text-system-muted">{translated.description}</p>
-                  </div>
-                </div>
-              </Panel>
-            );
-          })
-        )}
       </div>
     </div>
   );

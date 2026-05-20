@@ -1,9 +1,7 @@
 import {
   customQuestTemplateSchema,
   customQuestTemplateUpdateSchema,
-  keyParamSchema,
-  squadCreateSchema,
-  squadJoinSchema,
+  notificationSettingsUpdateSchema,
   telegramAuthSchema,
   userSettingsUpdateSchema,
   uuidParamSchema
@@ -69,6 +67,11 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
     return { data: await diagnoseSupabase() };
   }
 
+  if ((method === "GET" || method === "POST") && path === "notifications/tick") {
+    verifySetupSecret(req);
+    return { data: await hunterService.runNotificationTick() };
+  }
+
   if (method === "POST" && path === "telegram/webhook") {
     if (!verifyTelegramWebhookSecret(req)) throw unauthorized("Invalid Telegram webhook secret");
     await handleTelegramWebhook(await readBody(req), req);
@@ -119,6 +122,16 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
     rateLimit(req, `settings:update:${session.userId}`, 10, 60_000);
     const body = userSettingsUpdateSchema.parse(await readBody(req));
     return { data: await hunterService.updateSettings(session.userId, body) };
+  }
+
+  if (method === "GET" && path === "notification-settings") {
+    return { data: await hunterService.getNotificationSettings(session.userId) };
+  }
+
+  if (method === "POST" && path === "notification-settings") {
+    rateLimit(req, `notification-settings:update:${session.userId}`, 10, 60_000);
+    const body = notificationSettingsUpdateSchema.parse(await readBody(req));
+    return { data: await hunterService.updateNotificationSettings(session.userId, body) };
   }
 
   if (method === "GET" && path === "quests/today") {
@@ -226,28 +239,6 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
     rateLimit(req, `custom-quests:delete:${session.userId}`, 20, 60_000);
     const params = uuidParamSchema.parse({ id: segments[1] });
     return { data: await hunterService.deleteCustomQuest(session.userId, params.id) };
-  }
-
-  if (method === "GET" && path === "systems") {
-    return { data: await hunterService.getSystemsOverview(session.userId) };
-  }
-
-  if (method === "POST" && segments[0] === "skills" && segments[2] === "unlock") {
-    rateLimit(req, `skills:unlock:${session.userId}`, 8, 60_000);
-    const params = keyParamSchema.parse({ key: segments[1] });
-    return { data: await hunterService.unlockSkill(session.userId, params.key) };
-  }
-
-  if (method === "POST" && path === "squad/create") {
-    rateLimit(req, `squad:create:${session.userId}`, 4, 60_000);
-    const body = squadCreateSchema.parse(await readBody(req));
-    return { data: await hunterService.createSquad(session.userId, body.name), status: 201 };
-  }
-
-  if (method === "POST" && path === "squad/join") {
-    rateLimit(req, `squad:join:${session.userId}`, 8, 60_000);
-    const body = squadJoinSchema.parse(await readBody(req));
-    return { data: await hunterService.joinSquad(session.userId, body.code) };
   }
 
   throw notFound("Route not found");

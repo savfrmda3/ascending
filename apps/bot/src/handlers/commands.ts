@@ -8,7 +8,6 @@ import {
   renderProfile,
   renderQuests,
   renderSettingsHelp,
-  renderSystems,
   renderStats
 } from "./renderers.js";
 import { requireTelegramUser } from "./actions.js";
@@ -61,15 +60,6 @@ export function registerCommands(bot: Telegraf) {
     await ctx.reply(renderBoss(boss), {
       parse_mode: "HTML",
       ...bossKeyboard(boss)
-    });
-  });
-
-  bot.command("systems", async (ctx) => {
-    await syncUser(ctx);
-    const systems = await apiClient.getSystems(requireTelegramUser(ctx).id);
-    await ctx.reply(renderSystems(systems), {
-      parse_mode: "HTML",
-      ...profileKeyboard()
     });
   });
 

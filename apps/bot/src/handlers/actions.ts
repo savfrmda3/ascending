@@ -17,7 +17,6 @@ import {
   renderQuestCompleted,
   renderQuestDetails,
   renderQuests,
-  renderSystems,
   renderStats
 } from "./renderers.js";
 
@@ -43,12 +42,6 @@ export function registerActions(bot: Telegraf) {
     await ctx.answerCbQuery();
     const { profile, stats } = await apiClient.getProfile(requireTelegramUser(ctx).id);
     await editOrReply(ctx, renderStats(profile, stats), profileKeyboard());
-  });
-
-  bot.action("show_systems", async (ctx) => {
-    await ctx.answerCbQuery();
-    const systems = await apiClient.getSystems(requireTelegramUser(ctx).id);
-    await editOrReply(ctx, renderSystems(systems), profileKeyboard());
   });
 
   bot.action("show_today_quests", async (ctx) => {

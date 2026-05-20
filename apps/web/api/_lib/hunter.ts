@@ -23,6 +23,8 @@ import {
   type HunterGoal,
   type InventoryCatalogItem,
   type InventorySummary,
+  type NotificationTickResult,
+  type NotificationType,
   type ProgressDay,
   type ProgressHistory,
   type Quest,
@@ -37,6 +39,7 @@ import {
   type SquadSummary,
   type StatKey,
   type SystemsOverview,
+  type UserNotificationSettings,
   type UserSettings,
   type UserStats,
   type Weekday,
@@ -67,6 +70,7 @@ let timezoneColumnsAvailable: boolean | null = null;
 let userSettingsTableAvailable: boolean | null = null;
 let expansionTablesAvailable: boolean | null = null;
 let customQuestTablesAvailable: boolean | null = null;
+let notificationTablesAvailable: boolean | null = null;
 
 interface AchievementCatalogItem {
   title: string;
@@ -200,6 +204,8 @@ const BOSS_COLUMNS =
 const ACHIEVEMENT_COLUMNS = "id,user_id,key,title,description,unlocked_at";
 const USER_SETTINGS_COLUMNS =
   "id,user_id,primary_goal,desired_difficulty,quests_per_day,wake_time,sleep_time,allow_physical_quests,preferred_categories,onboarding_completed,created_at,updated_at";
+const NOTIFICATION_SETTINGS_COLUMNS =
+  "id,user_id,morning_enabled,morning_time,evening_enabled,evening_time,sleep_enabled,bedtime,sleep_remind_before_minutes,quest_reminders_enabled,active_quest_reminders_enabled,boss_reminders_enabled,streak_warning_enabled,progress_notifications_enabled,quiet_hours_start,quiet_hours_end,max_daily_notifications,created_at,updated_at";
 const QUEST_TEMPLATE_COLUMNS =
   "id,title,description,category,difficulty,xp_reward,stat_reward_key,stat_reward_value,is_active";
 
@@ -260,6 +266,7 @@ export class HunterService {
     const user = await this.createOrUpdateUser(input);
     await this.ensureStats(user.id);
     await this.ensureSettings(user.id);
+    await this.ensureNotificationSettings(user.id);
     await this.ensureDailyQuests(user.id);
     await this.ensureWeeklyBoss(user.id);
     return this.getProfileBundle(user.id);
@@ -391,6 +398,53 @@ export class HunterService {
 
     userSettingsTableAvailable = true;
     return toSettings(data);
+  }
+
+  async getNotificationSettings(userId: string): Promise<UserNotificationSettings> {
+    return this.ensureNotificationSettings(userId);
+  }
+
+  async updateNotificationSettings(userId: string, input: Partial<UserNotificationSettings>): Promise<UserNotificationSettings> {
+    if (notificationTablesAvailable === false) throw badRequest("Notification settings storage is not ready");
+
+    const { data, error } = await supabase
+      .from("user_notification_settings")
+      .update({
+        ...(typeof input.morningEnabled === "boolean" ? { morning_enabled: input.morningEnabled } : {}),
+        ...(input.morningTime !== undefined ? { morning_time: input.morningTime } : {}),
+        ...(typeof input.eveningEnabled === "boolean" ? { evening_enabled: input.eveningEnabled } : {}),
+        ...(input.eveningTime !== undefined ? { evening_time: input.eveningTime } : {}),
+        ...(typeof input.sleepEnabled === "boolean" ? { sleep_enabled: input.sleepEnabled } : {}),
+        ...(input.bedtime !== undefined ? { bedtime: input.bedtime } : {}),
+        ...(typeof input.sleepRemindBeforeMinutes === "number" ? { sleep_remind_before_minutes: input.sleepRemindBeforeMinutes } : {}),
+        ...(typeof input.questRemindersEnabled === "boolean" ? { quest_reminders_enabled: input.questRemindersEnabled } : {}),
+        ...(typeof input.activeQuestRemindersEnabled === "boolean" ? { active_quest_reminders_enabled: input.activeQuestRemindersEnabled } : {}),
+        ...(typeof input.bossRemindersEnabled === "boolean" ? { boss_reminders_enabled: input.bossRemindersEnabled } : {}),
+        ...(typeof input.streakWarningEnabled === "boolean" ? { streak_warning_enabled: input.streakWarningEnabled } : {}),
+        ...(typeof input.progressNotificationsEnabled === "boolean" ? { progress_notifications_enabled: input.progressNotificationsEnabled } : {}),
+        ...(input.quietHoursStart !== undefined ? { quiet_hours_start: input.quietHoursStart } : {}),
+        ...(input.quietHoursEnd !== undefined ? { quiet_hours_end: input.quietHoursEnd } : {}),
+        ...(typeof input.maxDailyNotifications === "number" ? { max_daily_notifications: input.maxDailyNotifications } : {}),
+        updated_at: new Date().toISOString()
+      })
+      .eq("user_id", userId)
+      .select(NOTIFICATION_SETTINGS_COLUMNS)
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingNotificationTable(error)) {
+        notificationTablesAvailable = false;
+        throw badRequest("Notification settings storage is not ready", error);
+      }
+      throw badRequest("Unable to update notification settings", error);
+    }
+    if (!data) {
+      await this.ensureNotificationSettings(userId);
+      return this.updateNotificationSettings(userId, input);
+    }
+
+    notificationTablesAvailable = true;
+    return toNotificationSettings(data);
   }
 
   async getCustomQuests(userId: string): Promise<CustomQuestTemplate[]> {
@@ -696,11 +750,11 @@ export class HunterService {
     await supabase.from("users").update({ streak, updated_at: new Date().toISOString() }).eq("id", userId);
 
     const bossProgress = await this.syncBossProgress(userId);
-    await this.syncSeasonProgress(userId, { questXp: quest.xp_reward });
     const unlockedAchievements = [
       ...(await this.evaluateAchievements(userId, { leveledUp: levelUp.leveledUp })),
       ...(bossProgress?.unlockedAchievements ?? [])
     ];
+    await this.sendProgressNotifications(userId, levelUp, unlockedAchievements).catch(() => undefined);
     const { profile, stats } = await this.getProfileBundle(userId);
 
     return {
@@ -781,9 +835,285 @@ export class HunterService {
     return result;
   }
 
+  async runNotificationTick(): Promise<NotificationTickResult> {
+    if (notificationTablesAvailable === false) return { checkedUsers: 0, sent: 0, skipped: 0, errors: 0 };
+
+    const { data, error } = await supabase
+      .from("user_notification_settings")
+      .select(NOTIFICATION_SETTINGS_COLUMNS)
+      .limit(250);
+
+    if (error) {
+      if (isMissingNotificationTable(error)) {
+        notificationTablesAvailable = false;
+        return { checkedUsers: 0, sent: 0, skipped: 0, errors: 0 };
+      }
+      throw badRequest("Unable to load notification settings", error);
+    }
+
+    notificationTablesAvailable = true;
+    const result: NotificationTickResult = { checkedUsers: data?.length ?? 0, sent: 0, skipped: 0, errors: 0 };
+
+    for (const row of data ?? []) {
+      try {
+        const settings = toNotificationSettings(row);
+        const user = await this.getUser(settings.userId);
+        const timezone = await this.getUserTimezone(settings.userId);
+        const timezoneOffset = normalizeTimezoneOffset(timezone.timezone_offset);
+        const local = localClock(new Date(), timezoneOffset);
+        if (isWithinQuietHours(local.minutes, settings.quietHoursStart, settings.quietHoursEnd)) {
+          result.skipped += 1;
+          continue;
+        }
+
+        const sentToday = await this.countNotificationsToday(settings.userId, local.date);
+        if (sentToday >= settings.maxDailyNotifications) {
+          result.skipped += 1;
+          continue;
+        }
+
+        const dashboard = await this.getDashboard(settings.userId);
+        const due = this.buildDueNotifications(settings, dashboard, local);
+        let sentForUser = 0;
+        for (const notification of due) {
+          if (sentToday + sentForUser >= settings.maxDailyNotifications) break;
+          const sent = await this.sendPlannedNotification(settings.userId, Number(user.telegram_id), notification.type, notification.text, notification.payload);
+          if (sent) {
+            result.sent += 1;
+            sentForUser += 1;
+          } else {
+            result.skipped += 1;
+          }
+        }
+      } catch {
+        result.errors += 1;
+      }
+    }
+
+    return result;
+  }
+
   async progressBossByTelegramId(telegramId: number, bossId: string) {
     const user = await this.getUserByTelegramId(telegramId);
     return this.progressBoss(user.id, bossId);
+  }
+
+  private buildDueNotifications(
+    settings: UserNotificationSettings,
+    dashboard: DashboardSummary,
+    local: { date: string; minutes: number; time: string }
+  ): Array<{ type: NotificationType; text: string; payload: Record<string, unknown> }> {
+    const total = dashboard.todayQuests.length;
+    const completed = dashboard.todayQuests.filter((quest) => quest.status === "completed").length;
+    const unfinished = dashboard.todayQuests.filter((quest) => quest.status === "active" || quest.status === "in_progress");
+    const activeQuest = dashboard.todayQuests.find((quest) => quest.status === "in_progress") ?? null;
+    const recommended = dashboard.todayQuests.find((quest) => quest.status === "active") ?? activeQuest;
+    const notifications: Array<{ type: NotificationType; text: string; payload: Record<string, unknown> }> = [];
+
+    if (settings.morningEnabled && local.minutes >= timeToMinutes(settings.morningTime)) {
+      notifications.push({
+        type: "morning_protocol",
+        payload: { date: local.date },
+        text: [
+          "<b>[СИСТЕМА] Ежедневный протокол активирован.</b>",
+          `Сегодня доступно квестов: <b>${total}</b>.`,
+          `Серия: <b>${dashboard.profile.streak}</b> дн.`,
+          recommended ? `Рекомендуемый первый квест: <b>${escapeTelegramHtml(recommended.title)}</b>.` : "Дневной протокол уже закрыт."
+        ].join("\n")
+      });
+    }
+
+    if (settings.questRemindersEnabled && unfinished.length > 0 && local.minutes >= timeToMinutes("17:00")) {
+      notifications.push({
+        type: "unfinished_quests",
+        payload: { date: local.date },
+        text: [
+          "<b>[СИСТЕМА] Остались незавершённые квесты.</b>",
+          `Сегодня выполнено: <b>${completed}/${Math.max(total, 1)}</b>.`,
+          "Открой протокол и выбери один следующий шаг."
+        ].join("\n")
+      });
+    }
+
+    if (settings.activeQuestRemindersEnabled && activeQuest?.startedAt && local.minutes >= timeToMinutes("12:00")) {
+      const ageMinutes = Math.floor((Date.now() - new Date(activeQuest.startedAt).getTime()) / 60_000);
+      if (ageMinutes >= 90) {
+        notifications.push({
+          type: "active_quest_reminder",
+          payload: { date: local.date, questId: activeQuest.id },
+          text: [
+            "<b>[СИСТЕМА] Активный квест всё ещё в процессе.</b>",
+            `<b>${escapeTelegramHtml(activeQuest.title)}</b>`,
+            "Заверши, отмени или продолжи выполнение."
+          ].join("\n")
+        });
+      }
+    }
+
+    if (settings.eveningEnabled && local.minutes >= timeToMinutes(settings.eveningTime)) {
+      notifications.push({
+        type: "evening_report",
+        payload: { date: local.date },
+        text: [
+          "<b>[СИСТЕМА] Вечерняя проверка.</b>",
+          `Сегодня выполнено: <b>${completed}/${Math.max(total, 1)}</b>.`,
+          completed > 0 ? "Прогресс сохранён." : "Серия под угрозой: выполни хотя бы один лёгкий квест."
+        ].join("\n")
+      });
+    }
+
+    if (settings.sleepEnabled && settings.bedtime) {
+      const reminderAt = (timeToMinutes(settings.bedtime) - settings.sleepRemindBeforeMinutes + 1440) % 1440;
+      if (local.minutes >= reminderAt) {
+        notifications.push({
+          type: "sleep_reminder",
+          payload: { date: local.date },
+          text: [
+            "<b>[СИСТЕМА] Ночной протокол скоро начнётся.</b>",
+            "Рекомендуется завершить дела и подготовиться ко сну.",
+            "Сон влияет на восстановление энергии."
+          ].join("\n")
+        });
+      }
+    }
+
+    if (settings.streakWarningEnabled && completed === 0 && local.minutes >= timeToMinutes("21:00")) {
+      notifications.push({
+        type: "streak_warning",
+        payload: { date: local.date },
+        text: [
+          "<b>[СИСТЕМА] Серия под угрозой.</b>",
+          "Выполни хотя бы один лёгкий квест, чтобы сохранить прогресс."
+        ].join("\n")
+      });
+    }
+
+    if (settings.bossRemindersEnabled && dashboard.boss?.status === "active" && dashboard.boss.progress < dashboard.boss.target && local.minutes >= timeToMinutes("18:00")) {
+      notifications.push({
+        type: "boss_reminder",
+        payload: { date: local.date, bossId: dashboard.boss.id },
+        text: [
+          "<b>[СИСТЕМА] Испытание недели ещё активно.</b>",
+          `Прогресс: <b>${dashboard.boss.progress}/${dashboard.boss.target}</b>.`,
+          `Осталось выполнить focus-квестов: <b>${dashboard.boss.target - dashboard.boss.progress}</b>.`
+        ].join("\n")
+      });
+    }
+
+    return notifications;
+  }
+
+  private async sendPlannedNotification(
+    userId: string,
+    telegramId: number,
+    type: NotificationType,
+    text: string,
+    payload: Record<string, unknown>
+  ) {
+    const date = String(payload.date ?? todayDateString());
+    if (await this.wasNotificationSent(userId, type, date)) return false;
+    return this.sendTelegramSystemMessage(userId, telegramId, type, text, payload);
+  }
+
+  private async sendProgressNotifications(
+    userId: string,
+    levelUp: { leveledUp: boolean; from: number; to: number },
+    achievements: Achievement[]
+  ) {
+    const settings = await this.ensureNotificationSettings(userId);
+    if (!settings.progressNotificationsEnabled) return;
+    const user = await this.getUser(userId);
+
+    if (levelUp.leveledUp) {
+      await this.sendTelegramSystemMessage(
+        userId,
+        Number(user.telegram_id),
+        "level_up",
+        `<b>[СИСТЕМА] Повышение уровня.</b>\nУровень <b>${levelUp.from}</b> → <b>${levelUp.to}</b>.\nПрогресс сохранён.`,
+        { date: todayDateString(), level: levelUp.to }
+      );
+    }
+
+    for (const achievement of achievements) {
+      await this.sendTelegramSystemMessage(
+        userId,
+        Number(user.telegram_id),
+        "achievement",
+        `<b>[СИСТЕМА] Достижение открыто.</b>\n<b>${escapeTelegramHtml(achievement.title)}</b>\n${escapeTelegramHtml(achievement.description)}`,
+        { date: todayDateString(), achievementKey: achievement.key }
+      );
+    }
+  }
+
+  private async sendTelegramSystemMessage(
+    userId: string,
+    telegramId: number,
+    type: NotificationType,
+    text: string,
+    payload: Record<string, unknown>
+  ) {
+    const token = optionalEnv("BOT_TOKEN");
+    if (!token) {
+      await this.logNotification(userId, type, payload, "error");
+      return false;
+    }
+
+    const replyMarkup = miniAppReplyMarkup();
+    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: telegramId,
+        text,
+        parse_mode: "HTML",
+        reply_markup: replyMarkup
+      })
+    });
+    const data = await response.json().catch(() => null) as { ok?: boolean } | null;
+    const status = response.ok && data?.ok ? "sent" : "error";
+    await this.logNotification(userId, type, payload, status);
+    return status === "sent";
+  }
+
+  private async logNotification(userId: string, type: NotificationType, payload: Record<string, unknown>, status: "sent" | "skipped" | "error") {
+    if (notificationTablesAvailable === false) return;
+    const { error } = await supabase.from("notification_logs").insert({ user_id: userId, type, payload, status });
+    if (error && isMissingNotificationTable(error)) notificationTablesAvailable = false;
+  }
+
+  private async wasNotificationSent(userId: string, type: NotificationType, date: string) {
+    if (notificationTablesAvailable === false) return true;
+    const { data, error } = await supabase
+      .from("notification_logs")
+      .select("id,payload")
+      .eq("user_id", userId)
+      .eq("type", type)
+      .eq("status", "sent")
+      .gte("sent_at", `${date}T00:00:00.000Z`)
+      .limit(20);
+
+    if (error) {
+      if (isMissingNotificationTable(error)) notificationTablesAvailable = false;
+      return true;
+    }
+
+    return (data ?? []).some((row: any) => String(row.payload?.date ?? "") === date);
+  }
+
+  private async countNotificationsToday(userId: string, date: string) {
+    if (notificationTablesAvailable === false) return 0;
+    const { count, error } = await supabase
+      .from("notification_logs")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("status", "sent")
+      .gte("sent_at", `${date}T00:00:00.000Z`);
+
+    if (error) {
+      if (isMissingNotificationTable(error)) notificationTablesAvailable = false;
+      return 0;
+    }
+    return count ?? 0;
   }
 
   async getAchievements(userId: string) {
@@ -1396,6 +1726,47 @@ export class HunterService {
     return toSettings(created);
   }
 
+  private async ensureNotificationSettings(userId: string): Promise<UserNotificationSettings> {
+    const fallback = defaultNotificationSettings(userId);
+    if (notificationTablesAvailable === false) return fallback;
+
+    const { data, error } = await supabase
+      .from("user_notification_settings")
+      .select(NOTIFICATION_SETTINGS_COLUMNS)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingNotificationTable(error)) {
+        notificationTablesAvailable = false;
+        return fallback;
+      }
+      throw badRequest("Unable to load notification settings", error);
+    }
+
+    if (data) {
+      notificationTablesAvailable = true;
+      return toNotificationSettings(data);
+    }
+
+    const { data: created, error: createError } = await supabase
+      .from("user_notification_settings")
+      .insert({ user_id: userId })
+      .select(NOTIFICATION_SETTINGS_COLUMNS)
+      .single();
+
+    if (createError || !created) {
+      if (isMissingNotificationTable(createError)) {
+        notificationTablesAvailable = false;
+        return fallback;
+      }
+      throw badRequest("Unable to create notification settings", createError);
+    }
+
+    notificationTablesAvailable = true;
+    return toNotificationSettings(created);
+  }
+
   private async getCustomQuestTemplate(userId: string, templateId: string): Promise<CustomQuestTemplate> {
     const { data, error } = await supabase
       .from("custom_quest_templates")
@@ -1808,8 +2179,6 @@ export class HunterService {
         updatedBoss = toBoss(data);
         if (victory) {
           await this.award(userId, currentBoss.xpReward, currentBoss.statRewardKey, currentBoss.statRewardValue, "Охотник фокуса");
-          await this.syncSeasonProgress(userId, { bossDefeated: true });
-          await this.awardInventoryItem(userId, "focus_booster", 1);
           unlockedAchievements = await this.evaluateAchievements(userId, { bossDefeated: true });
         }
       } else {
@@ -2143,7 +2512,6 @@ export class HunterService {
     if (rows.length === 0) return [];
     const { data, error } = await supabase.from("achievements").insert(rows).select(ACHIEVEMENT_COLUMNS);
     if (error) throw badRequest("Unable to unlock achievement", error);
-    await Promise.all(rows.map((row) => this.awardAchievementItem(userId, row.key)));
     return (data ?? []).map(toAchievement);
   }
 
@@ -2251,6 +2619,30 @@ function toSettings(row: any): UserSettings {
   };
 }
 
+function toNotificationSettings(row: any): UserNotificationSettings {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    morningEnabled: row.morning_enabled,
+    morningTime: normalizeTime(row.morning_time) ?? "09:00",
+    eveningEnabled: row.evening_enabled,
+    eveningTime: normalizeTime(row.evening_time) ?? "20:00",
+    sleepEnabled: row.sleep_enabled,
+    bedtime: normalizeTime(row.bedtime),
+    sleepRemindBeforeMinutes: row.sleep_remind_before_minutes,
+    questRemindersEnabled: row.quest_reminders_enabled,
+    activeQuestRemindersEnabled: row.active_quest_reminders_enabled,
+    bossRemindersEnabled: row.boss_reminders_enabled,
+    streakWarningEnabled: row.streak_warning_enabled,
+    progressNotificationsEnabled: row.progress_notifications_enabled,
+    quietHoursStart: normalizeTime(row.quiet_hours_start),
+    quietHoursEnd: normalizeTime(row.quiet_hours_end),
+    maxDailyNotifications: row.max_daily_notifications,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
 function toCustomQuestTemplate(row: any): CustomQuestTemplate {
   return {
     id: row.id,
@@ -2284,8 +2676,74 @@ function defaultSettings(userId: string): UserSettings {
   };
 }
 
+function defaultNotificationSettings(userId: string): UserNotificationSettings {
+  const now = new Date().toISOString();
+  return {
+    id: `default-notifications-${userId}`,
+    userId,
+    morningEnabled: true,
+    morningTime: "09:00",
+    eveningEnabled: true,
+    eveningTime: "20:00",
+    sleepEnabled: false,
+    bedtime: null,
+    sleepRemindBeforeMinutes: 45,
+    questRemindersEnabled: false,
+    activeQuestRemindersEnabled: false,
+    bossRemindersEnabled: false,
+    streakWarningEnabled: false,
+    progressNotificationsEnabled: true,
+    quietHoursStart: null,
+    quietHoursEnd: null,
+    maxDailyNotifications: 4,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
 function normalizeTime(value: string | null | undefined) {
   return value ? value.slice(0, 5) : null;
+}
+
+function timeToMinutes(value: string) {
+  const [hours = "0", minutes = "0"] = value.split(":");
+  return Number(hours) * 60 + Number(minutes);
+}
+
+function localClock(date: Date, timezoneOffset?: number | null) {
+  const safeOffset = normalizeTimezoneOffset(timezoneOffset);
+  const local = safeOffset === null ? new Date(date) : new Date(date.getTime() - safeOffset * 60_000);
+  const hours = local.getUTCHours();
+  const minutes = local.getUTCMinutes();
+  return {
+    date: local.toISOString().slice(0, 10),
+    minutes: hours * 60 + minutes,
+    time: `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`
+  };
+}
+
+function isWithinQuietHours(currentMinutes: number, start: string | null, end: string | null) {
+  if (!start || !end) return false;
+  const from = timeToMinutes(start);
+  const to = timeToMinutes(end);
+  if (from === to) return false;
+  if (from < to) return currentMinutes >= from && currentMinutes < to;
+  return currentMinutes >= from || currentMinutes < to;
+}
+
+function escapeTelegramHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function miniAppReplyMarkup() {
+  const url = optionalEnv("MINI_APP_URL");
+  if (!url) return undefined;
+  return {
+    inline_keyboard: [[{ text: "Открыть System Hunter", web_app: { url } }]]
+  };
 }
 
 function pickRandom<T>(items: T[], count: number) {
@@ -2478,6 +2936,19 @@ function isMissingSettingsTable(error: unknown) {
     record.code === "42P01" ||
     record.code === "PGRST205" ||
     String(record.message ?? "").includes("user_settings")
+  );
+}
+
+function isMissingNotificationTable(error: unknown) {
+  const record = error as { code?: string; message?: string };
+  const message = String(record.message ?? "");
+  return (
+    record.code === "42P01" ||
+    record.code === "42703" ||
+    record.code === "PGRST204" ||
+    record.code === "PGRST205" ||
+    message.includes("user_notification_settings") ||
+    message.includes("notification_logs")
   );
 }
 

@@ -61,6 +61,26 @@ export const userSettingsUpdateSchema = z.object({
   onboardingCompleted: z.boolean().optional()
 });
 
+const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+
+export const notificationSettingsUpdateSchema = z.object({
+  morningEnabled: z.boolean().optional(),
+  morningTime: timeSchema.optional(),
+  eveningEnabled: z.boolean().optional(),
+  eveningTime: timeSchema.optional(),
+  sleepEnabled: z.boolean().optional(),
+  bedtime: timeSchema.optional().nullable(),
+  sleepRemindBeforeMinutes: z.coerce.number().int().min(15).max(120).optional(),
+  questRemindersEnabled: z.boolean().optional(),
+  activeQuestRemindersEnabled: z.boolean().optional(),
+  bossRemindersEnabled: z.boolean().optional(),
+  streakWarningEnabled: z.boolean().optional(),
+  progressNotificationsEnabled: z.boolean().optional(),
+  quietHoursStart: timeSchema.optional().nullable(),
+  quietHoursEnd: timeSchema.optional().nullable(),
+  maxDailyNotifications: z.coerce.number().int().min(1).max(12).optional()
+});
+
 export const squadCreateSchema = z.object({
   name: z.string().trim().min(2).max(40)
 });

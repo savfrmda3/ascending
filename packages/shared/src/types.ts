@@ -218,6 +218,46 @@ export interface UserSettings {
   updatedAt: string;
 }
 
+export type NotificationType =
+  | "morning_protocol"
+  | "unfinished_quests"
+  | "active_quest_reminder"
+  | "evening_report"
+  | "sleep_reminder"
+  | "streak_warning"
+  | "boss_reminder"
+  | "level_up"
+  | "achievement";
+
+export interface UserNotificationSettings {
+  id: string;
+  userId: string;
+  morningEnabled: boolean;
+  morningTime: string;
+  eveningEnabled: boolean;
+  eveningTime: string;
+  sleepEnabled: boolean;
+  bedtime: string | null;
+  sleepRemindBeforeMinutes: number;
+  questRemindersEnabled: boolean;
+  activeQuestRemindersEnabled: boolean;
+  bossRemindersEnabled: boolean;
+  streakWarningEnabled: boolean;
+  progressNotificationsEnabled: boolean;
+  quietHoursStart: string | null;
+  quietHoursEnd: string | null;
+  maxDailyNotifications: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NotificationTickResult {
+  checkedUsers: number;
+  sent: number;
+  skipped: number;
+  errors: number;
+}
+
 export interface DashboardSummary {
   profile: HunterProfile;
   stats: UserStats;
