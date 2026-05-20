@@ -362,7 +362,7 @@ export class HunterService {
     const prepared = await this.prepareGeneratedQuest(userId);
     const { data: replaced, error } = await supabase
       .from("quests")
-      .update({ status: "replaced" })
+      .update({ status: "skipped", cancelled_at: new Date().toISOString() })
       .eq("id", questId)
       .eq("user_id", userId)
       .eq("status", "active")
@@ -1902,7 +1902,6 @@ function buildProgressCalendar(quests: Quest[], since: string, today: string): P
       day.xp += quest.xpReward;
     }
     if (quest.status === "skipped") day.skipped += 1;
-    if (quest.status === "replaced") day.replaced += 1;
   }
 
   return [...days.values()];
@@ -1929,9 +1928,8 @@ function buildWeeklyRecap(quests: Quest[], startsAt: string, endsAt: string): We
       completedByCategory.set(quest.category, (completedByCategory.get(quest.category) ?? 0) + 1);
     }
 
-    if (quest.status === "skipped" || quest.status === "replaced") {
-      if (quest.status === "skipped") recap.skipped += 1;
-      if (quest.status === "replaced") recap.replaced += 1;
+    if (quest.status === "skipped") {
+      recap.skipped += 1;
       missedByCategory.set(quest.category, (missedByCategory.get(quest.category) ?? 0) + 1);
     }
   }

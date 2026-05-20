@@ -1,18 +1,21 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 export function Panel({
   children,
   className = "",
-  glow = false
+  glow = false,
+  style
 }: {
   children: ReactNode;
   className?: string;
   glow?: boolean;
+  style?: CSSProperties;
 }) {
   return (
     <section
       className={`hud-panel min-w-0 border border-system-border bg-system-card/88 p-4 ${glow ? "hud-panel-glow" : ""} ${className}`}
+      style={style}
     >
       {children}
     </section>
@@ -97,7 +100,7 @@ export function PrimaryButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`hud-button min-h-11 min-w-0 border px-3 py-2 text-center text-xs font-semibold leading-tight transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 sm:text-sm ${className}`}
+      className={`hud-button min-h-11 min-w-0 border px-3 py-2 text-center text-xs font-semibold leading-tight transition duration-150 active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-system-cyan disabled:cursor-not-allowed disabled:opacity-45 sm:text-sm ${className}`}
       type={type}
     >
       {children}
@@ -114,26 +117,31 @@ export function Modal({
   children: ReactNode;
   onClose: () => void;
 }) {
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
     }
 
     window.addEventListener("keydown", onKeyDown);
+    closeButtonRef.current?.focus();
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+    <div className="modal-backdrop-enter fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
       <div
+        aria-label={title}
         aria-modal="true"
-        className="hud-panel level-up w-full max-w-sm border border-system-cyan/50 bg-system-card p-5 shadow-cyan"
+        className="hud-panel modal-enter w-full max-w-sm border border-system-cyan/50 bg-system-card p-5 shadow-cyan"
         role="dialog"
       >
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-mono text-lg font-black uppercase text-system-text">{title}</h2>
           <button
-            className="hud-button grid size-9 place-items-center border border-system-border bg-white/5 text-system-muted"
+            ref={closeButtonRef}
+            className="hud-button grid size-9 place-items-center border border-system-border bg-white/5 text-system-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-system-cyan"
             onClick={onClose}
             type="button"
             aria-label="Закрыть окно"

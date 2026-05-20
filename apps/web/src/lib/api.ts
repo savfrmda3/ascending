@@ -137,6 +137,18 @@ export function completeQuest(id: string) {
   });
 }
 
+export function startQuest(id: string) {
+  return request<Quest>(`/api/quests/${id}/start`, {
+    method: "POST"
+  });
+}
+
+export function cancelQuest(id: string) {
+  return request<Quest>(`/api/quests/${id}/cancel`, {
+    method: "POST"
+  });
+}
+
 export function skipQuest(id: string) {
   return request<Quest>(`/api/quests/${id}/skip`, {
     method: "POST"
@@ -213,6 +225,16 @@ function translateApiMessage(message?: string) {
     "Quest not found": "Квест не найден",
     "Quest is already completed": "Квест уже выполнен",
     "Quest is not active": "Квест уже нельзя изменить: он не активен",
+    "Quest must be started before completion": "Сначала возьми квест в выполнение",
+    "Another quest is already in progress": "У тебя уже есть активный квест. Заверши или отмени его перед выбором нового.",
+    "Quest is already in progress": "Квест уже выполняется",
+    "Only active quests can be started": "Взять можно только активный квест",
+    "Only in-progress quests can be cancelled": "Отменить можно только выполняемый квест",
+    "Only in-progress quests can be completed": "Завершить можно только квест в процессе",
+    "Unable to start quest": "Не удалось взять квест",
+    "Unable to cancel quest": "Не удалось отменить квест",
+    "Unable to inspect active quest": "Не удалось проверить активный квест",
+    "Active quest storage is not ready": "Хранилище активных квестов еще не обновлено. Примени новую миграцию Supabase.",
     "Skipped quest cannot be completed": "Пропущенный квест нельзя выполнить",
     "Completed quest cannot be skipped": "Выполненный квест нельзя пропустить",
     "Quest is already skipped": "Квест уже пропущен",
@@ -284,9 +306,15 @@ function translateApiMessage(message?: string) {
     "Unable to disable custom quest": "Не удалось отключить привычку",
     "Unable to enable custom quest": "Не удалось включить привычку",
     "Custom quest not found": "Привычка не найдена",
+    "Custom quest is deleted": "Этот квест уже удален",
     "Choose at least one weekday": "Выбери хотя бы один день недели",
-    "Completed quest history is preserved": "Нельзя удалить выполненный квест: история сохранена",
-    "Only today's custom quest can be deleted": "Удалить можно только сегодняшний активный пользовательский квест",
+    "Weekdays must not be empty": "Выбери хотя бы один день недели",
+    "Invalid recurrence type": "Некорректный тип повторения",
+    "Title is required": "Укажи название квеста",
+    "Cannot delete completed quest": "Нельзя удалить выполненный квест, история сохранена",
+    "Cancel quest before deletion": "Сначала отмени активный квест",
+    "Only custom quests can be deleted": "Удалять можно только пользовательские квесты",
+    "Only today's custom quest can be deleted": "Удалить можно только сегодняшний пользовательский квест",
     "Unable to delete today's custom quest": "Не удалось удалить сегодняшний квест"
   };
 

@@ -136,6 +136,18 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
     return { data: await hunterService.generateQuest(session.userId), status: 201 };
   }
 
+  if (method === "POST" && segments[0] === "quests" && segments[2] === "start") {
+    rateLimit(req, `quests:start:${session.userId}`, 20, 60_000);
+    const params = uuidParamSchema.parse({ id: segments[1] });
+    return { data: await hunterService.startQuest(session.userId, params.id) };
+  }
+
+  if (method === "POST" && segments[0] === "quests" && segments[2] === "cancel") {
+    rateLimit(req, `quests:cancel:${session.userId}`, 20, 60_000);
+    const params = uuidParamSchema.parse({ id: segments[1] });
+    return { data: await hunterService.cancelQuest(session.userId, params.id) };
+  }
+
   if (method === "POST" && segments[0] === "quests" && segments[2] === "complete") {
     rateLimit(req, `quests:complete:${session.userId}`, 20, 60_000);
     const params = uuidParamSchema.parse({ id: segments[1] });

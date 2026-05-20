@@ -210,6 +210,13 @@ async function handleCallback(callback: TelegramCallbackQuery, req: ApiRequest) 
     return;
   }
 
+  if (data.startsWith("start_quest:")) {
+    const quest = await hunterService.startQuest(bundle.profile.id, data.split(":")[1] ?? "");
+    await editMessage(chatId, messageId, renderQuestDetails(quest), questDetailsKeyboard(quest, req));
+    await answerCallback(callback.id, "Квест взят.");
+    return;
+  }
+
   if (data.startsWith("complete_quest:")) {
     const result = await hunterService.completeQuest(bundle.profile.id, data.split(":")[1] ?? "");
     await editMessage(chatId, messageId, renderQuestCompleted(result), questCompletedKeyboard(req));
@@ -276,9 +283,12 @@ function profileKeyboard(req: ApiRequest) {
 
 function questsKeyboard(quests: Quest[], req: ApiRequest) {
   const activeRows = quests
-    .filter((quest) => quest.status === "active")
+    .filter((quest) => quest.status === "active" || quest.status === "in_progress")
     .flatMap((quest) => [
-      [{ text: `Выполнить: ${shorten(quest.title)}`, callback_data: `complete_quest:${quest.id}` }],
+      [{
+        text: `${quest.status === "in_progress" ? "Открыть" : "Взять"}: ${shorten(quest.title)}`,
+        callback_data: quest.status === "in_progress" ? `quest_details:${quest.id}` : `start_quest:${quest.id}`
+      }],
       [{ text: `Детали: ${shorten(quest.title)}`, callback_data: `quest_details:${quest.id}` }]
     ]);
 
@@ -292,7 +302,12 @@ function questsKeyboard(quests: Quest[], req: ApiRequest) {
 }
 
 function questDetailsKeyboard(quest: Quest | undefined, req: ApiRequest) {
-  const rows = quest?.status === "active" ? [[{ text: "Выполнить", callback_data: `complete_quest:${quest.id}` }]] : [];
+  const rows =
+    quest?.status === "active"
+      ? [[{ text: "Взять квест", callback_data: `start_quest:${quest.id}` }]]
+      : quest?.status === "in_progress"
+        ? [[{ text: "Завершить", callback_data: `complete_quest:${quest.id}` }]]
+        : [];
   return {
     inline_keyboard: [
       ...rows,

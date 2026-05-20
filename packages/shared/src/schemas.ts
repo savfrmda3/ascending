@@ -70,8 +70,8 @@ export const squadJoinSchema = z.object({
 });
 
 const customQuestTemplateBaseSchema = z.object({
-  title: z.string().trim().min(2).max(80),
-  description: z.string().trim().max(400).optional().default(""),
+  title: z.string().trim().min(1, "Title is required").max(80),
+  description: z.string().trim().max(300).optional().default(""),
   category: questCategorySchema,
   difficulty: difficultySchema,
   recurrenceType: recurrenceTypeSchema,
@@ -86,7 +86,7 @@ export const customQuestTemplateSchema = customQuestTemplateBaseSchema
     if (value.recurrenceType === "weekdays" && value.weekdays.length === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Выбери хотя бы один день недели",
+        message: "Weekdays must not be empty",
         path: ["weekdays"]
       });
     }
@@ -96,7 +96,7 @@ export const customQuestTemplateUpdateSchema = customQuestTemplateBaseSchema.par
   if (value.recurrenceType === "weekdays" && (!value.weekdays || value.weekdays.length === 0)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "Выбери хотя бы один день недели",
+      message: "Weekdays must not be empty",
       path: ["weekdays"]
     });
   }

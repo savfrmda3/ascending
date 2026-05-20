@@ -10,7 +10,7 @@ export type StatKey =
 
 export type QuestCategory = StatKey;
 export type Difficulty = "easy" | "medium" | "hard";
-export type QuestStatus = "active" | "completed" | "skipped" | "replaced";
+export type QuestStatus = "active" | "in_progress" | "completed" | "skipped";
 export type QuestType = "daily" | "generated" | "custom";
 export type QuestSource = "system" | "generated" | "custom";
 export type BossStatus = "active" | "completed" | "expired";
@@ -84,7 +84,10 @@ export interface Quest {
   reason?: string | null;
   status: QuestStatus;
   dueDate: string;
+  startedAt: string | null;
+  cancelledAt: string | null;
   completedAt: string | null;
+  deletedAt: string | null;
   createdAt: string;
 }
 

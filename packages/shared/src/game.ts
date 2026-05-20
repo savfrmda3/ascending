@@ -38,7 +38,7 @@ export function customQuestRewards(category: QuestCategory, difficulty: Difficul
   return {
     xpReward: XP_REWARDS[difficulty],
     statRewardKey: CATEGORY_TO_STAT[category],
-    statRewardValue: difficulty === "hard" ? 2 : 1
+    statRewardValue: 1
   };
 }
 

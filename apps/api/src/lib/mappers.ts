@@ -4,8 +4,10 @@ import type {
   HunterProfile,
   Quest,
   QuestCategory,
+  QuestSource,
   QuestStatus,
   QuestTag,
+  QuestType,
   Rank,
   StatKey,
   UserStats,
@@ -48,7 +50,9 @@ export interface QuestRow {
   user_id: string;
   title: string;
   description: string;
-  type: "daily" | "generated";
+  type: QuestType;
+  source?: QuestSource | null;
+  custom_template_id?: string | null;
   category: QuestCategory;
   difficulty: "easy" | "medium" | "hard";
   xp_reward: number;
@@ -59,7 +63,10 @@ export interface QuestRow {
   reason?: string | null;
   status: QuestStatus;
   due_date: string;
+  started_at?: string | null;
+  cancelled_at?: string | null;
   completed_at: string | null;
+  deleted_at?: string | null;
   created_at: string;
 }
 
@@ -156,9 +163,14 @@ export function toQuest(row: QuestRow): Quest {
     estimatedMinutes: row.estimated_minutes ?? null,
     tags: Array.isArray(row.tags) ? (row.tags as QuestTag[]) : [],
     reason: row.reason ?? null,
+    source: row.source ?? (row.type === "generated" ? "generated" : row.type === "custom" ? "custom" : "system"),
+    customTemplateId: row.custom_template_id ?? null,
     status: row.status,
     dueDate: row.due_date,
+    startedAt: row.started_at ?? null,
+    cancelledAt: row.cancelled_at ?? null,
     completedAt: row.completed_at,
+    deletedAt: row.deleted_at ?? null,
     createdAt: row.created_at
   };
 }

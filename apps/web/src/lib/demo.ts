@@ -65,7 +65,10 @@ export const demoDashboard: DashboardSummary = {
       statRewardValue: 1,
       status: "active",
       dueDate: today,
+      startedAt: null,
+      cancelledAt: null,
       completedAt: null,
+      deletedAt: null,
       createdAt: now
     },
     {
@@ -81,7 +84,10 @@ export const demoDashboard: DashboardSummary = {
       statRewardValue: 1,
       status: "active",
       dueDate: today,
+      startedAt: null,
+      cancelledAt: null,
       completedAt: null,
+      deletedAt: null,
       createdAt: now
     },
     {
@@ -97,7 +103,10 @@ export const demoDashboard: DashboardSummary = {
       statRewardValue: 1,
       status: "completed",
       dueDate: today,
+      startedAt: now,
+      cancelledAt: null,
       completedAt: now,
+      deletedAt: null,
       createdAt: now
     }
   ],

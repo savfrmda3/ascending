@@ -189,8 +189,10 @@ const USER_STATS_COLUMNS =
   "id,user_id,strength,intelligence,vitality,discipline,focus,charisma,created_at,updated_at";
 const QUEST_COLUMNS =
   "id,user_id,title,description,type,category,difficulty,xp_reward,stat_reward_key,stat_reward_value,status,due_date,completed_at,created_at";
+const QUEST_RUNTIME_COLUMNS =
+  `${QUEST_COLUMNS},source,custom_template_id,reason,started_at,cancelled_at,deleted_at`;
 const CUSTOM_QUEST_INSTANCE_COLUMNS =
-  `${QUEST_COLUMNS},source,custom_template_id,reason`;
+  QUEST_RUNTIME_COLUMNS;
 const CUSTOM_QUEST_COLUMNS =
   "id,user_id,title,description,category,difficulty,xp_reward,stat_reward_key,stat_reward_value,recurrence_type,weekdays,starts_at,ends_at,is_active,deleted_at,created_at,updated_at";
 const BOSS_COLUMNS =
@@ -318,12 +320,17 @@ export class HunterService {
   async getTodayQuests(userId: string) {
     await this.ensureDailyQuests(userId);
     const { today } = await this.getDateContext(userId);
-    const { data, error } = await supabase
+    let query = supabase
       .from("quests")
       .select(customQuestTablesAvailable === false ? QUEST_COLUMNS : CUSTOM_QUEST_INSTANCE_COLUMNS)
       .eq("user_id", userId)
-      .eq("due_date", today)
-      .order("created_at", { ascending: true });
+      .eq("due_date", today);
+
+    if (customQuestTablesAvailable !== false) {
+      query = query.is("deleted_at", null);
+    }
+
+    const { data, error } = await query.order("created_at", { ascending: true });
 
     if (error && isMissingCustomQuestSchema(error)) {
       customQuestTablesAvailable = false;
@@ -534,9 +541,10 @@ export class HunterService {
     const { today } = await this.getDateContext(userId);
     const { data: quest, error: loadError } = await supabase
       .from("quests")
-      .select("id,user_id,type,status,due_date,custom_template_id")
+      .select("id,user_id,type,status,due_date,custom_template_id,deleted_at")
       .eq("id", questId)
       .eq("user_id", userId)
+      .is("deleted_at", null)
       .maybeSingle();
 
     if (loadError) {
@@ -544,19 +552,24 @@ export class HunterService {
       throw badRequest("Unable to load quest", loadError);
     }
     if (!quest) throw notFound("Quest not found");
-    if (quest.status === "completed") throw conflict("Completed quest history is preserved");
-    if (quest.status !== "active") throw conflict("Quest is not active");
-    if (quest.type !== "custom" || !quest.custom_template_id) throw conflict("Only today's custom quest can be deleted");
+    if (quest.status === "completed") throw conflict("Cannot delete completed quest");
+    if (quest.status === "in_progress") throw conflict("Cancel quest before deletion");
+    if (quest.type !== "custom" || !quest.custom_template_id) throw conflict("Only custom quests can be deleted");
     if (quest.due_date !== today) throw conflict("Only today's custom quest can be deleted");
+    if (quest.status !== "active" && quest.status !== "skipped") throw conflict("Only custom quests can be deleted");
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("quests")
-      .delete()
+      .update({ deleted_at: new Date().toISOString() })
       .eq("id", questId)
       .eq("user_id", userId)
-      .eq("status", "active");
+      .in("status", ["active", "skipped"])
+      .is("deleted_at", null)
+      .select(CUSTOM_QUEST_INSTANCE_COLUMNS)
+      .maybeSingle();
 
     if (error) throw badRequest("Unable to delete today's custom quest", error);
+    if (!data) throw conflict("Only custom quests can be deleted");
     return { deleted: true };
   }
 
@@ -571,16 +584,18 @@ export class HunterService {
 
   async replaceQuest(userId: string, questId: string) {
     const quest = await this.getQuest(userId, questId);
+    if (quest.deleted_at) throw notFound("Quest not found");
     if (quest.status !== "active") throw conflict("Only active quests can be replaced");
 
     const prepared = await this.prepareGeneratedQuest(userId);
     const { data: replaced, error: replaceError } = await supabase
       .from("quests")
-      .update({ status: "replaced" })
+      .update({ status: "skipped", cancelled_at: new Date().toISOString() })
       .eq("id", questId)
       .eq("user_id", userId)
       .eq("status", "active")
-      .select(QUEST_COLUMNS)
+      .is("deleted_at", null)
+      .select(CUSTOM_QUEST_INSTANCE_COLUMNS)
       .maybeSingle();
 
     if (replaceError) throw badRequest("Unable to replace quest", replaceError);
@@ -590,11 +605,72 @@ export class HunterService {
     return this.insertGeneratedQuest(userId, prepared.template, prepared.today);
   }
 
+  async startQuest(userId: string, questId: string) {
+    const quest = await this.getQuest(userId, questId);
+    if (quest.deleted_at) throw notFound("Quest not found");
+    if (quest.status === "in_progress") throw conflict("Quest is already in progress");
+    if (quest.status !== "active") throw conflict("Only active quests can be started");
+
+    const { today } = await this.getDateContext(userId);
+    const { data: existing, error: existingError } = await supabase
+      .from("quests")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("due_date", today)
+      .eq("status", "in_progress")
+      .is("deleted_at", null)
+      .neq("id", questId)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingError) throw badRequest("Unable to inspect active quest", existingError);
+    if (existing) throw conflict("Another quest is already in progress");
+
+    const { data, error } = await supabase
+      .from("quests")
+      .update({ status: "in_progress", started_at: new Date().toISOString(), cancelled_at: null })
+      .eq("id", questId)
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .is("deleted_at", null)
+      .select(CUSTOM_QUEST_INSTANCE_COLUMNS)
+      .maybeSingle();
+
+    if (error) throw badRequest("Unable to start quest", error);
+    if (!data) throw conflict("Only active quests can be started");
+    return toQuest(data);
+  }
+
+  async cancelQuest(userId: string, questId: string) {
+    const quest = await this.getQuest(userId, questId);
+    if (quest.deleted_at) throw notFound("Quest not found");
+    if (quest.status !== "in_progress") throw conflict("Only in-progress quests can be cancelled");
+
+    const { data, error } = await supabase
+      .from("quests")
+      .update({ status: "active", cancelled_at: new Date().toISOString() })
+      .eq("id", questId)
+      .eq("user_id", userId)
+      .eq("status", "in_progress")
+      .is("deleted_at", null)
+      .select(CUSTOM_QUEST_INSTANCE_COLUMNS)
+      .maybeSingle();
+
+    if (error) throw badRequest("Unable to cancel quest", error);
+    if (!data) throw conflict("Only in-progress quests can be cancelled");
+    return toQuest(data);
+  }
+
   async completeQuest(userId: string, questId: string): Promise<QuestCompletionResult> {
     const quest = await this.getQuest(userId, questId);
-    if (quest.status !== "active") throw conflict("Quest is not active");
+    if (quest.deleted_at) throw notFound("Quest not found");
+    if (quest.status === "active") throw conflict("Quest must be started before completion");
+    if (quest.status === "completed") throw conflict("Quest is already completed");
+    if (quest.status === "skipped") throw conflict("Skipped quest cannot be completed");
+    if (quest.status !== "in_progress") throw conflict("Only in-progress quests can be completed");
     if (quest.difficulty === "hard") {
-      await this.spendEnergy(userId, HARD_QUEST_ENERGY_COST, "Not enough energy for hard quest");
+      const user = await this.getUser(userId);
+      if (Number(user.energy ?? 0) < HARD_QUEST_ENERGY_COST) throw conflict("Not enough energy for hard quest");
     }
 
     const { data, error } = await supabase
@@ -602,12 +678,17 @@ export class HunterService {
       .update({ status: "completed", completed_at: new Date().toISOString() })
       .eq("id", questId)
       .eq("user_id", userId)
-      .eq("status", "active")
-      .select(QUEST_COLUMNS)
+      .eq("status", "in_progress")
+      .is("deleted_at", null)
+      .select(CUSTOM_QUEST_INSTANCE_COLUMNS)
       .maybeSingle();
 
     if (error) throw badRequest("Unable to complete quest", error);
-    if (!data) throw conflict("Quest is not active");
+    if (!data) throw conflict("Only in-progress quests can be completed");
+
+    if (quest.difficulty === "hard") {
+      await this.adjustVitals(userId, { energyDelta: -HARD_QUEST_ENERGY_COST });
+    }
 
     const levelUp = await this.award(userId, quest.xp_reward, quest.stat_reward_key, quest.stat_reward_value);
     await this.applyQuestVitals(userId, quest);
@@ -648,6 +729,7 @@ export class HunterService {
 
   async skipQuest(userId: string, questId: string) {
     const quest = await this.getQuest(userId, questId);
+    if (quest.deleted_at) throw notFound("Quest not found");
     if (quest.status !== "active") throw conflict("Only active quests can be skipped");
 
     const { data, error } = await supabase
@@ -656,7 +738,8 @@ export class HunterService {
       .eq("id", questId)
       .eq("user_id", userId)
       .eq("status", "active")
-      .select(QUEST_COLUMNS)
+      .is("deleted_at", null)
+      .select(CUSTOM_QUEST_INSTANCE_COLUMNS)
       .maybeSingle();
 
     if (error) throw badRequest("Unable to skip quest", error);
@@ -1374,6 +1457,7 @@ export class HunterService {
 
     const questsByTemplate = new Map<string, Quest[]>();
     for (const quest of (data ?? []).map(toQuest)) {
+      if (quest.deletedAt) continue;
       const templateId = quest.customTemplateId;
       if (!templateId) continue;
       const bucket = questsByTemplate.get(templateId) ?? [];
@@ -1592,7 +1676,7 @@ export class HunterService {
         stat_reward_value: template.statRewardValue,
         due_date: today
       })
-      .select(QUEST_COLUMNS)
+      .select(CUSTOM_QUEST_INSTANCE_COLUMNS)
       .single();
 
     if (error?.code === "23505") throw conflict("Quest already exists today");
@@ -1840,12 +1924,17 @@ export class HunterService {
   private async getQuest(userId: string, questId: string) {
     const { data, error } = await supabase
       .from("quests")
-      .select(QUEST_COLUMNS)
+      .select(CUSTOM_QUEST_INSTANCE_COLUMNS)
       .eq("id", questId)
       .eq("user_id", userId)
       .maybeSingle();
 
-    if (error) throw badRequest("Unable to load quest", error);
+    if (error) {
+      if (isMissingCustomQuestSchema(error)) {
+        throw badRequest("Active quest storage is not ready", error);
+      }
+      throw badRequest("Unable to load quest", error);
+    }
     if (!data) throw notFound("Quest not found");
     return data;
   }
@@ -2106,7 +2195,10 @@ function toQuest(row: any): Quest {
     customTemplateId: row.custom_template_id ?? null,
     status: row.status,
     dueDate: row.due_date,
+    startedAt: row.started_at ?? null,
+    cancelledAt: row.cancelled_at ?? null,
     completedAt: row.completed_at,
+    deletedAt: row.deleted_at ?? null,
     createdAt: row.created_at
   };
 }
@@ -2318,8 +2410,8 @@ function buildHabitProgress(template: CustomQuestTemplate, quests: Quest[], sinc
 function habitDayStatus(date: string, today: string, due: boolean, quest: Quest | null): HabitDayStatus {
   if (!due) return "scheduled";
   if (quest?.status === "completed") return "completed";
-  if (quest?.status === "skipped" || quest?.status === "replaced") return "skipped";
-  if (quest?.status === "active") return "active";
+  if (quest?.status === "skipped") return "skipped";
+  if (quest?.status === "active" || quest?.status === "in_progress") return "active";
   return date < today ? "missed" : "scheduled";
 }
 
@@ -2408,7 +2500,7 @@ function isMissingCustomQuestSchema(error: unknown) {
     record?.code === "42703" ||
     record?.code === "PGRST204" ||
     record?.code === "PGRST205" ||
-    ["custom_quest_templates", "custom_template_id", "quests.source", "source", "reason"].some((item) => message.includes(item))
+    ["custom_quest_templates", "custom_template_id", "quests.source", "source", "reason", "started_at", "cancelled_at", "deleted_at"].some((item) => message.includes(item))
   );
 }
 
@@ -2492,7 +2584,6 @@ function buildProgressCalendar(quests: Quest[], since: string, today: string): P
       day.xp += quest.xpReward;
     }
     if (quest.status === "skipped") day.skipped += 1;
-    if (quest.status === "replaced") day.replaced += 1;
   }
 
   return [...days.values()];
@@ -2519,9 +2610,8 @@ function buildWeeklyRecap(quests: Quest[], startsAt: string, endsAt: string): We
       completedByCategory.set(quest.category, (completedByCategory.get(quest.category) ?? 0) + 1);
     }
 
-    if (quest.status === "skipped" || quest.status === "replaced") {
-      if (quest.status === "skipped") recap.skipped += 1;
-      if (quest.status === "replaced") recap.replaced += 1;
+    if (quest.status === "skipped") {
+      recap.skipped += 1;
       missedByCategory.set(quest.category, (missedByCategory.get(quest.category) ?? 0) + 1);
     }
   }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import {
   BarChart3,
   Battery,
@@ -58,14 +58,16 @@ import {
   getSystemsOverview,
   joinSquad,
   replaceQuest,
+  cancelQuest,
   skipQuest,
+  startQuest,
   unlockSkill,
   updateCustomQuest,
   updateSettings
 } from "./lib/api.js";
 import { demoDashboard, demoProgressHistory } from "./lib/demo.js";
 
-type View = "dashboard" | "quests" | "stats" | "boss" | "profile" | "settings" | "progress" | "systems";
+type View = "dashboard" | "quests" | "activeQuest" | "stats" | "boss" | "profile" | "settings" | "progress" | "systems";
 type AppModal =
   | { type: "quest"; result: QuestCompletionResult }
   | { type: "boss"; result: BossProgressResult }
@@ -148,9 +150,9 @@ const GOAL_LABELS_RU: Record<UserSettings["primaryGoal"], string> = {
 
 const STATUS_LABELS_RU: Record<Quest["status"], string> = {
   active: "Активен",
+  in_progress: "В процессе",
   completed: "Выполнен",
-  skipped: "Пропущен",
-  replaced: "Заменен"
+  skipped: "Пропущен"
 };
 
 const RARITY_LABELS_RU: Record<ProgressHistory["achievementCollection"][number]["rarity"], string> = {
@@ -315,6 +317,27 @@ function formatRuDate(value: string) {
   return new Date(value).toLocaleDateString("ru-RU");
 }
 
+function formatRuTime(value: string) {
+  return new Date(value).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDuration(startedAt: string, now: number) {
+  const diffMs = Math.max(0, now - new Date(startedAt).getTime());
+  const minutes = Math.floor(diffMs / 60_000);
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  if (hours > 0) return `${hours} ч ${restMinutes} мин`;
+  return `${Math.max(1, restMinutes)} мин`;
+}
+
+function hapticImpact(style: "light" | "medium" | "heavy" = "light") {
+  window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style);
+}
+
+function hapticNotify(type: "success" | "warning" | "error") {
+  window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred(type);
+}
+
 export function App() {
   const [view, setView] = useState<View>("dashboard");
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
@@ -330,6 +353,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [modal, setModal] = useState<AppModal>(null);
+  const [selectedQuestId, setSelectedQuestId] = useState<string | null>(null);
 
   useEffect(() => {
     async function boot() {
@@ -371,6 +395,14 @@ export function App() {
   const completedToday = useMemo(
     () => dashboard?.todayQuests.filter((quest) => quest.status === "completed").length ?? 0,
     [dashboard]
+  );
+  const inProgressQuest = useMemo(
+    () => dashboard?.todayQuests.find((quest) => quest.status === "in_progress") ?? null,
+    [dashboard]
+  );
+  const selectedQuest = useMemo(
+    () => dashboard?.todayQuests.find((quest) => quest.id === selectedQuestId) ?? inProgressQuest,
+    [dashboard, inProgressQuest, selectedQuestId]
   );
 
   async function refresh() {
@@ -638,21 +670,84 @@ export function App() {
     }
   }
 
+  async function onStartQuest(quest: Quest) {
+    setBusyId(quest.id);
+    try {
+      if (demoMode) {
+        const current = dashboard ?? demoDashboard;
+        if (current.todayQuests.some((item) => item.status === "in_progress" && item.id !== quest.id)) {
+          throw new Error("У тебя уже есть активный квест. Заверши или отмени его перед выбором нового.");
+        }
+        if (quest.status !== "active") throw new Error("Взять можно только активный квест.");
+        startQuestInDemo(quest);
+        setSelectedQuestId(quest.id);
+        setView("activeQuest");
+        hapticImpact("light");
+        setModal({ type: "notice", title: "КВЕСТ ВЗЯТ", body: "Награда будет начислена только после завершения на экране активного квеста." });
+        return;
+      }
+
+      const started = await startQuest(quest.id);
+      await refresh();
+      setSelectedQuestId(started.id);
+      setView("activeQuest");
+      hapticImpact("light");
+      setModal({ type: "notice", title: "КВЕСТ ВЗЯТ", body: "Система перевела квест в режим выполнения." });
+    } catch (caught) {
+      hapticNotify("error");
+      setModal({ type: "notice", title: "КВЕСТ НЕ ВЗЯТ", body: caught instanceof Error ? caught.message : "Не удалось взять квест" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onCancelQuest(quest: Quest) {
+    setBusyId(quest.id);
+    try {
+      if (demoMode) {
+        cancelQuestInDemo(quest);
+        setSelectedQuestId(null);
+        setView("quests");
+        hapticImpact("light");
+        setModal({ type: "notice", title: "КВЕСТ ОТМЕНЕН", body: "Квест вернулся в список доступных. Награда не начислена." });
+        return;
+      }
+
+      await cancelQuest(quest.id);
+      await refresh();
+      setSelectedQuestId(null);
+      setView("quests");
+      hapticImpact("light");
+      setModal({ type: "notice", title: "КВЕСТ ОТМЕНЕН", body: "Квест снова доступен в дневном списке." });
+    } catch (caught) {
+      hapticNotify("error");
+      setModal({ type: "notice", title: "ОТМЕНА НЕ УДАЛАСЬ", body: caught instanceof Error ? caught.message : "Не удалось отменить квест" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function onCompleteQuest(quest: Quest) {
     setBusyId(quest.id);
     try {
       if (demoMode) {
         const result = completeQuestInDemo(quest);
         setModal({ type: "quest", result });
+        setSelectedQuestId(null);
+        setView("quests");
+        hapticNotify("success");
         return;
       }
 
       const result = await completeQuest(quest.id);
       setModal({ type: "quest", result });
-      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred("success");
+      hapticNotify("success");
       await refresh();
+      setSelectedQuestId(null);
+      setView("quests");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Не удалось завершить квест");
+      hapticNotify("error");
+      setModal({ type: "notice", title: "КВЕСТ НЕ ЗАВЕРШЕН", body: caught instanceof Error ? caught.message : "Не удалось завершить квест" });
     } finally {
       setBusyId(null);
     }
@@ -671,6 +766,7 @@ export function App() {
       await refresh();
       setModal({ type: "notice", title: "КВЕСТ ПРОПУЩЕН", body: "Квест снят с активного протокола. Награда не начислена." });
     } catch (caught) {
+      hapticNotify("error");
       setModal({ type: "notice", title: "ОШИБКА", body: caught instanceof Error ? caught.message : "Не удалось пропустить квест" });
     } finally {
       setBusyId(null);
@@ -689,8 +785,9 @@ export function App() {
 
       await replaceQuest(quest.id);
       await refresh();
-      setModal({ type: "notice", title: "КВЕСТ ЗАМЕНЕН", body: "Старый квест закрыт как замененный, новый добавлен без повтора." });
+      setModal({ type: "notice", title: "КВЕСТ ЗАМЕНЕН", body: "Старый квест пропущен, новый добавлен без повтора." });
     } catch (caught) {
+      hapticNotify("error");
       setModal({ type: "notice", title: "ОШИБКА", body: caught instanceof Error ? caught.message : "Не удалось заменить квест" });
     } finally {
       setBusyId(null);
@@ -719,6 +816,9 @@ export function App() {
                     difficulty: "hard",
                     xpReward: 75,
                     status: "active",
+                    startedAt: null,
+                    cancelledAt: null,
+                    deletedAt: null,
                     createdAt: new Date().toISOString()
                   } as Quest
                 ]
@@ -787,6 +887,46 @@ export function App() {
     };
   }
 
+  function startQuestInDemo(quest: Quest) {
+    setDashboard((current) => {
+      if (!current) return current;
+      const hasAnother = current.todayQuests.some((item) => item.status === "in_progress" && item.id !== quest.id);
+      if (hasAnother || quest.status !== "active") return current;
+      return {
+        ...current,
+        todayQuests: current.todayQuests.map((item) =>
+          item.id === quest.id
+            ? {
+                ...item,
+                status: "in_progress" as const,
+                startedAt: new Date().toISOString(),
+                cancelledAt: null
+              }
+            : item
+        )
+      };
+    });
+  }
+
+  function cancelQuestInDemo(quest: Quest) {
+    setDashboard((current) =>
+      current
+        ? {
+            ...current,
+            todayQuests: current.todayQuests.map((item) =>
+              item.id === quest.id
+                ? {
+                    ...item,
+                    status: "active" as const,
+                    cancelledAt: new Date().toISOString()
+                  }
+                : item
+            )
+          }
+        : current
+    );
+  }
+
   function progressBossFromDemoQuest(current: DashboardSummary, quest: Quest): BossProgressResult | null {
     if (quest.category !== "focus") return null;
     if (!current.boss || current.boss.status !== "active") return null;
@@ -814,7 +954,7 @@ export function App() {
     };
   }
 
-  function markQuestInDemo(quest: Quest, status: "skipped" | "replaced") {
+  function markQuestInDemo(quest: Quest, status: "skipped") {
     setDashboard((current) =>
       current
         ? {
@@ -845,13 +985,16 @@ export function App() {
       statRewardValue: 1,
       status: "active",
       completedAt: null,
+      startedAt: null,
+      cancelledAt: null,
+      deletedAt: null,
       createdAt: new Date().toISOString()
     };
 
     setDashboard({
       ...current,
       todayQuests: [
-        ...current.todayQuests.map((item) => (item.id === quest.id ? { ...item, status: "replaced" as const } : item)),
+        ...current.todayQuests.map((item) => (item.id === quest.id ? { ...item, status: "skipped" as const, cancelledAt: new Date().toISOString() } : item)),
         replacement
       ]
     });
@@ -941,7 +1084,10 @@ export function App() {
       statRewardValue: template.statRewardValue,
       status: "active",
       dueDate: today,
+      startedAt: null,
+      cancelledAt: null,
       completedAt: null,
+      deletedAt: null,
       createdAt: new Date().toISOString(),
       reason: "Пользовательский демо-квест."
     };
@@ -964,7 +1110,7 @@ export function App() {
         const quest = current.todayQuests.find((item) => item.customTemplateId === template.id && item.dueDate === date) ?? null;
         const status: HabitDayStatus = quest?.status === "completed"
           ? "completed"
-          : quest?.status === "skipped" || quest?.status === "replaced"
+          : quest?.status === "skipped"
             ? "skipped"
             : date === today && due
               ? "active"
@@ -1173,6 +1319,7 @@ export function App() {
               <DashboardView
                 dashboard={dashboard}
                 completedToday={completedToday}
+                activeQuest={inProgressQuest}
                 onView={setView}
                 demoMode={demoMode}
               />
@@ -1184,7 +1331,11 @@ export function App() {
                 customQuestProgress={customQuestProgress}
                 customQuestsLoading={customQuestsLoading}
                 busyId={busyId}
-                onCompleteQuest={onCompleteQuest}
+                onStartQuest={onStartQuest}
+                onOpenActiveQuest={(quest) => {
+                  setSelectedQuestId(quest.id);
+                  setView("activeQuest");
+                }}
                 onSkipQuest={onSkipQuest}
                 onReplaceQuest={onReplaceQuest}
                 onDeleteTodayQuest={onDeleteTodayQuest}
@@ -1193,6 +1344,15 @@ export function App() {
                 onUpdateCustomQuest={onUpdateCustomQuest}
                 onToggleCustomQuest={onToggleCustomQuest}
                 onDeleteCustomQuest={onDeleteCustomQuest}
+              />
+            ) : null}
+            {view === "activeQuest" ? (
+              <ActiveQuestView
+                busy={selectedQuest ? busyId === selectedQuest.id : false}
+                quest={selectedQuest?.status === "in_progress" ? selectedQuest : inProgressQuest}
+                onBack={() => setView("quests")}
+                onCancelQuest={onCancelQuest}
+                onCompleteQuest={onCompleteQuest}
               />
             ) : null}
             {view === "stats" ? <StatsView dashboard={dashboard} /> : null}
@@ -1304,11 +1464,13 @@ function DemoBanner() {
 function DashboardView({
   dashboard,
   completedToday,
+  activeQuest,
   onView,
   demoMode
 }: {
   dashboard: DashboardSummary;
   completedToday: number;
+  activeQuest: Quest | null;
   onView: (view: View) => void;
   demoMode: boolean;
 }) {
@@ -1318,7 +1480,7 @@ function DashboardView({
   const nextQuest = dashboard.todayQuests.find((quest) => quest.status === "active");
 
   return (
-    <div className="space-y-4">
+    <div className="screen-enter space-y-4">
       <section className="status-terminal">
         <div className="hud-title-frame">
           <p className="font-mono text-lg font-black uppercase tracking-normal">СТАТУС</p>
@@ -1385,6 +1547,27 @@ function DashboardView({
         </div>
       </section>
 
+      <Panel className={activeQuest ? "active-quest-glow border-system-cyan/55 bg-system-cyan/8" : "border-system-border"}>
+        <p className="font-mono text-xs font-bold uppercase text-system-cyan">Активный квест</p>
+        {activeQuest ? (
+          <div className="mt-2 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="truncate font-bold">{displayQuestTitle(activeQuest)}</h2>
+              <p className="mt-1 line-clamp-2 text-sm text-system-muted">{displayQuestDescription(activeQuest)}</p>
+              <p className="mt-2 font-mono text-[10px] uppercase text-system-cyan">
+                +{activeQuest.xpReward} XP / +{activeQuest.statRewardValue} {STAT_LABELS_RU[activeQuest.statRewardKey].short}
+              </p>
+            </div>
+            <PrimaryButton onClick={() => onView("activeQuest")}>Открыть</PrimaryButton>
+          </div>
+        ) : (
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <p className="text-sm text-system-muted">Нет активного квеста. Возьми один из дневного списка.</p>
+            <PrimaryButton onClick={() => onView("quests")} variant="ghost">Выбрать</PrimaryButton>
+          </div>
+        )}
+      </Panel>
+
       <Panel className="border-system-warning/35 bg-system-warning/8">
         <p className="font-mono text-xs font-bold uppercase text-system-muted">Следующее действие</p>
         <div className="mt-2 flex items-start justify-between gap-3">
@@ -1444,7 +1627,8 @@ function QuestsView({
   customQuestProgress,
   customQuestsLoading,
   busyId,
-  onCompleteQuest,
+  onStartQuest,
+  onOpenActiveQuest,
   onSkipQuest,
   onReplaceQuest,
   onDeleteTodayQuest,
@@ -1459,7 +1643,8 @@ function QuestsView({
   customQuestProgress: CustomQuestProgress[];
   customQuestsLoading: boolean;
   busyId: string | null;
-  onCompleteQuest: (quest: Quest) => void;
+  onStartQuest: (quest: Quest) => void;
+  onOpenActiveQuest: (quest: Quest) => void;
   onSkipQuest: (quest: Quest) => void;
   onReplaceQuest: (quest: Quest) => void;
   onDeleteTodayQuest: (quest: Quest) => void;
@@ -1489,7 +1674,7 @@ function QuestsView({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="screen-enter space-y-3">
       <ScreenTitle title="Ежедневные квесты" icon={<ListChecks size={20} />} />
       <div className="grid grid-cols-2 gap-2">
         <PrimaryButton onClick={startCreate}>Создать квест</PrimaryButton>
@@ -1515,8 +1700,19 @@ function QuestsView({
         />
       ) : null}
 
-      {quests.map((quest) => (
-        <Panel key={quest.id} className={questPanelClass(quest.status)}>
+      {quests.length === 0 ? (
+        <Panel>
+          <p className="font-bold">Квесты на сегодня не найдены.</p>
+          <p className="mt-1 text-sm text-system-muted">Создай свой квест или сгенерируй системный.</p>
+        </Panel>
+      ) : null}
+
+      {quests.map((quest, index) => (
+        <Panel
+          key={quest.id}
+          className={`card-enter ${questPanelClass(quest.status)}`}
+          style={{ "--card-delay": `${Math.min(index * 45, 240)}ms` } as CSSProperties}
+        >
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-black">{displayQuestTitle(quest)}</h2>
@@ -1535,12 +1731,18 @@ function QuestsView({
           </div>
           <p className="mt-2 text-xs leading-relaxed text-system-muted">{questReason(quest)}</p>
           <div className="mt-3 grid grid-cols-3 gap-2">
-            <PrimaryButton
-              disabled={quest.status !== "active" || busyId === quest.id}
-              onClick={() => onCompleteQuest(quest)}
-            >
-              {quest.status === "completed" ? "Выполнено" : "Выполнить"}
-            </PrimaryButton>
+            {quest.status === "in_progress" ? (
+              <PrimaryButton disabled={busyId === quest.id} onClick={() => onOpenActiveQuest(quest)}>
+                Открыть
+              </PrimaryButton>
+            ) : (
+              <PrimaryButton
+                disabled={quest.status !== "active" || busyId === quest.id}
+                onClick={() => onStartQuest(quest)}
+              >
+                {quest.status === "completed" ? "Выполнено" : quest.status === "skipped" ? "Пропущен" : "Взять квест"}
+              </PrimaryButton>
+            )}
             <PrimaryButton
               disabled={quest.status !== "active" || busyId === quest.id}
               onClick={() => onSkipQuest(quest)}
@@ -1556,7 +1758,7 @@ function QuestsView({
               Заменить
             </PrimaryButton>
           </div>
-          {quest.type === "custom" && quest.status === "active" ? (
+          {quest.type === "custom" && (quest.status === "active" || quest.status === "skipped") ? (
             <PrimaryButton
               disabled={busyId === quest.id}
               onClick={() => onDeleteTodayQuest(quest)}
@@ -1611,6 +1813,89 @@ function QuestsView({
           )}
         </div>
       </Panel>
+    </div>
+  );
+}
+
+function ActiveQuestView({
+  quest,
+  busy,
+  onCompleteQuest,
+  onCancelQuest,
+  onBack
+}: {
+  quest: Quest | null | undefined;
+  busy: boolean;
+  onCompleteQuest: (quest: Quest) => void;
+  onCancelQuest: (quest: Quest) => void;
+  onBack: () => void;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!quest?.startedAt) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [quest?.startedAt]);
+
+  if (!quest) {
+    return (
+      <div className="screen-enter space-y-4">
+        <ScreenTitle title="Активный квест" icon={<Zap size={20} />} />
+        <Panel>
+          <p className="font-bold">Активный квест не выбран.</p>
+          <p className="mt-1 text-sm text-system-muted">Возьми квест из списка, чтобы начать выполнение.</p>
+          <div className="mt-4">
+            <PrimaryButton onClick={onBack}>К списку квестов</PrimaryButton>
+          </div>
+        </Panel>
+      </div>
+    );
+  }
+
+  return (
+    <div className="screen-enter space-y-4">
+      <ScreenTitle title="Активный квест" icon={<Zap size={20} />} />
+      <Panel glow className="active-quest-glow border-system-cyan/60">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="font-mono text-xs font-bold uppercase text-system-cyan">В процессе</p>
+            <h2 className="mt-2 text-2xl font-black leading-tight">{displayQuestTitle(quest)}</h2>
+            <p className="mt-3 text-sm leading-relaxed text-system-muted">{displayQuestDescription(quest)}</p>
+          </div>
+          <StatusPill status={quest.status} />
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-2">
+          <Metric label="Категория" value={CATEGORY_LABELS_RU[quest.category]} />
+          <Metric label="Сложность" value={DIFFICULTY_LABELS_RU[quest.difficulty]} accent={difficultyColor(quest.difficulty)} />
+          <Metric label="XP" value={`+${quest.xpReward}`} accent="text-system-warning" />
+          <Metric label={STAT_LABELS_RU[quest.statRewardKey].short} value={`+${quest.statRewardValue}`} accent="text-system-cyan" />
+        </div>
+
+        <div className="mt-4 border border-system-cyan/20 bg-black/20 p-3">
+          <p className="font-mono text-[10px] uppercase text-system-muted">
+            Начат: {quest.startedAt ? formatRuTime(quest.startedAt) : "нет данных"}
+          </p>
+          <p className="mt-1 font-mono text-lg font-black text-system-cyan">
+            Выполняется: {quest.startedAt ? formatDuration(quest.startedAt, now) : "--"}
+          </p>
+        </div>
+
+        <p className="mt-4 text-xs leading-relaxed text-system-muted">{questReason(quest)}</p>
+      </Panel>
+
+      <div className="grid grid-cols-1 gap-2">
+        <PrimaryButton disabled={busy} onClick={() => onCompleteQuest(quest)}>
+          Завершить квест
+        </PrimaryButton>
+        <PrimaryButton disabled={busy} onClick={() => onCancelQuest(quest)} variant="danger">
+          Отменить квест
+        </PrimaryButton>
+        <PrimaryButton disabled={busy} onClick={onBack} variant="ghost">
+          Вернуться к списку
+        </PrimaryButton>
+      </div>
     </div>
   );
 }
@@ -1803,7 +2088,7 @@ function StatsView({ dashboard }: { dashboard: DashboardSummary }) {
   const maxStat = Math.max(...STAT_KEYS.map((key) => dashboard.stats[key]), 30);
 
   return (
-    <div className="space-y-4">
+    <div className="screen-enter space-y-4">
       <ScreenTitle title="Характеристики" icon={<Gauge size={20} />} />
       <Panel glow>
         <div className="grid grid-cols-2 gap-3">
@@ -1843,7 +2128,7 @@ function BossView({
 
   if (!boss) {
     return (
-      <div className="space-y-4">
+      <div className="screen-enter space-y-4">
         <ScreenTitle title="Босс недели" icon={<Swords size={20} />} />
         <Panel>Активный босс-квест не найден.</Panel>
       </div>
@@ -1851,7 +2136,7 @@ function BossView({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="screen-enter space-y-4">
       <ScreenTitle title="Босс недели" icon={<Swords size={20} />} />
       <section className="boss-card rounded-lg border border-system-purple/50 p-5 shadow-glow">
         <p className="font-mono text-xs font-bold uppercase text-system-cyan">Босс</p>
@@ -1946,7 +2231,7 @@ function SettingsView({
 
   return (
     <form
-      className="space-y-4"
+      className="screen-enter space-y-4"
       onSubmit={(event) => {
         event.preventDefault();
         onSave(draft);
@@ -2086,7 +2371,7 @@ function ProgressView({
 }) {
   if (loading || !history) {
     return (
-      <div className="space-y-4">
+      <div className="screen-enter space-y-4">
         <ScreenTitle title="История прогресса" icon={<CalendarDays size={20} />} />
         <Panel glow>
           <p className="font-mono text-sm font-bold uppercase text-system-cyan">СИНХРОНИЗАЦИЯ</p>
@@ -2100,7 +2385,7 @@ function ProgressView({
   const perfectDays = history.calendar.filter((day) => day.total > 0 && day.completed === day.total).length;
 
   return (
-    <div className="space-y-4">
+    <div className="screen-enter space-y-4">
       <ScreenTitle title="История прогресса" icon={<CalendarDays size={20} />} />
 
       <Panel glow>
@@ -2240,7 +2525,7 @@ function SystemsView({
 
   if (loading || !systems) {
     return (
-      <div className="space-y-4">
+      <div className="screen-enter space-y-4">
         <ScreenTitle title="Системы" icon={<Package size={20} />} />
         <Panel glow>
           <p className="font-mono text-sm font-bold uppercase text-system-cyan">МОДУЛИ ЗАГРУЖАЮТСЯ</p>
@@ -2251,7 +2536,7 @@ function SystemsView({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="screen-enter space-y-4">
       <ScreenTitle title="Системы" icon={<Package size={20} />} />
 
       <Panel glow>
@@ -2381,7 +2666,7 @@ function ProfileView({
   onView: (view: View) => void;
 }) {
   return (
-    <div className="space-y-4">
+    <div className="screen-enter space-y-4">
       <ScreenTitle title="Профиль" icon={<User size={20} />} />
       <Panel glow>
         <div className="flex items-center gap-4">
@@ -2532,8 +2817,10 @@ function StatusPill({ status }: { status: Quest["status"] }) {
   const className =
     status === "completed"
       ? "border-system-success/50 bg-system-success/10 text-system-success"
-      : status === "skipped" || status === "replaced"
+      : status === "skipped"
         ? "border-system-danger/50 bg-system-danger/10 text-system-danger"
+        : status === "in_progress"
+          ? "border-system-warning/60 bg-system-warning/10 text-system-warning"
         : "border-system-cyan/50 bg-system-cyan/10 text-system-cyan";
 
   return (
@@ -2545,7 +2832,8 @@ function StatusPill({ status }: { status: Quest["status"] }) {
 
 function questPanelClass(status: Quest["status"]) {
   if (status === "completed") return "border-system-success/45";
-  if (status === "skipped" || status === "replaced") return "border-system-danger/40 opacity-75";
+  if (status === "skipped") return "border-system-danger/40 opacity-75";
+  if (status === "in_progress") return "active-quest-glow border-system-warning/55";
   return "";
 }
 
