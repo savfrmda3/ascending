@@ -23,22 +23,33 @@ import {
 import {
   STAT_KEYS,
   applyXp,
+  customQuestRewards,
   xpToNextLevel,
   type BossProgressResult,
+  type CustomQuestInput,
+  type CustomQuestTemplate,
   type DashboardSummary,
   type ProgressHistory,
   type Quest,
   type QuestCompletionResult,
+  type RecurrenceType,
   type StatKey,
   type SystemsOverview,
-  type UserSettings
+  type UserSettings,
+  type Weekday
 } from "@system-hunter/shared";
 import { Modal, Panel, PrimaryButton, ProgressBar, Metric } from "./components/ui.js";
 import {
   authenticateTelegram,
   completeQuest,
   createSquad,
+  createCustomQuest,
+  deleteCustomQuest,
+  deleteTodayCustomQuest,
+  disableCustomQuest,
+  enableCustomQuest,
   generateQuest,
+  getCustomQuests,
   getDashboard,
   getProgressHistory,
   getSystemsOverview,
@@ -46,6 +57,7 @@ import {
   replaceQuest,
   skipQuest,
   unlockSkill,
+  updateCustomQuest,
   updateSettings
 } from "./lib/api.js";
 import { demoDashboard, demoProgressHistory } from "./lib/demo.js";
@@ -97,6 +109,23 @@ const DIFFICULTY_LABELS_RU: Record<Quest["difficulty"], string> = {
   medium: "Средний",
   hard: "Сложный"
 };
+
+const RECURRENCE_LABELS_RU: Record<RecurrenceType, string> = {
+  once: "Один раз",
+  daily: "Каждый день",
+  weekly: "Каждую неделю",
+  weekdays: "По дням недели"
+};
+
+const WEEKDAY_LABELS_RU: Array<{ value: Weekday; label: string }> = [
+  { value: 1, label: "Пн" },
+  { value: 2, label: "Вт" },
+  { value: 3, label: "Ср" },
+  { value: 4, label: "Чт" },
+  { value: 5, label: "Пт" },
+  { value: 6, label: "Сб" },
+  { value: 7, label: "Вс" }
+];
 
 const GOAL_LABELS_RU: Record<UserSettings["primaryGoal"], string> = {
   sport: "Спорт",
@@ -255,6 +284,15 @@ function displayAchievement(achievement: { key: string; title: string; descripti
   };
 }
 
+function recurrenceLabel(template: Pick<CustomQuestTemplate, "recurrenceType" | "weekdays">) {
+  if (template.recurrenceType !== "weekdays") return RECURRENCE_LABELS_RU[template.recurrenceType];
+  const selected = WEEKDAY_LABELS_RU
+    .filter((day) => template.weekdays.includes(day.value))
+    .map((day) => day.label)
+    .join(", ");
+  return selected ? `По дням: ${selected}` : "По дням недели";
+}
+
 function displaySkillTitle(title: string) {
   return title
     .replace("Focus", "Фокус")
@@ -274,6 +312,8 @@ export function App() {
   const [progressLoading, setProgressLoading] = useState(false);
   const [systems, setSystems] = useState<SystemsOverview | null>(null);
   const [systemsLoading, setSystemsLoading] = useState(false);
+  const [customQuests, setCustomQuests] = useState<CustomQuestTemplate[]>([]);
+  const [customQuestsLoading, setCustomQuestsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -312,6 +352,11 @@ export function App() {
     void loadSystemsOverview();
   }, [view, demoMode, dashboard?.profile.id]);
 
+  useEffect(() => {
+    if (view !== "quests" || !dashboard) return;
+    void loadCustomQuests();
+  }, [view, demoMode, dashboard?.profile.id]);
+
   const completedToday = useMemo(
     () => dashboard?.todayQuests.filter((quest) => quest.status === "completed").length ?? 0,
     [dashboard]
@@ -322,6 +367,7 @@ export function App() {
     setDashboard(await getDashboard());
     setProgressHistory(null);
     setSystems(null);
+    setCustomQuests([]);
   }
 
   async function loadProgressHistory() {
@@ -356,6 +402,22 @@ export function App() {
     }
   }
 
+  async function loadCustomQuests() {
+    setCustomQuestsLoading(true);
+    try {
+      if (demoMode) {
+        setCustomQuests(demoCustomQuestTemplates());
+        return;
+      }
+
+      setCustomQuests(await getCustomQuests());
+    } catch (caught) {
+      setModal({ type: "notice", title: "МОИ КВЕСТЫ НЕДОСТУПНЫ", body: caught instanceof Error ? caught.message : "Не удалось загрузить пользовательские квесты" });
+    } finally {
+      setCustomQuestsLoading(false);
+    }
+  }
+
   async function onSaveSettings(input: Partial<UserSettings>) {
     setBusyId("settings");
     try {
@@ -383,6 +445,114 @@ export function App() {
       setView("dashboard");
     } catch (caught) {
       setModal({ type: "notice", title: "ОШИБКА НАСТРОЕК", body: caught instanceof Error ? caught.message : "Не удалось сохранить настройки" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function reloadQuestSurfaces() {
+    if (demoMode) return;
+    setDashboard(await getDashboard());
+    setCustomQuests(await getCustomQuests());
+    setProgressHistory(null);
+  }
+
+  async function onCreateCustomQuest(input: CustomQuestInput) {
+    setBusyId("custom-create");
+    try {
+      if (demoMode) {
+        const template = demoCustomQuestFromInput(input);
+        setCustomQuests((current) => [template, ...current]);
+        setDashboard((current) => current ? addDemoCustomQuestInstance(current, template) : current);
+        setModal({ type: "notice", title: "ПРИВЫЧКА ДЕМО", body: "Пользовательский квест добавлен только в демо-сценарии." });
+        return;
+      }
+
+      await createCustomQuest(input);
+      await reloadQuestSurfaces();
+      setModal({ type: "notice", title: "ПРИВЫЧКА СОЗДАНА", body: "Если квест подходит под сегодняшний день, он уже добавлен в дневной протокол." });
+    } catch (caught) {
+      setModal({ type: "notice", title: "ПРИВЫЧКА НЕ СОЗДАНА", body: caught instanceof Error ? caught.message : "Не удалось создать пользовательский квест" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onUpdateCustomQuest(id: string, input: Partial<CustomQuestInput>) {
+    setBusyId(id);
+    try {
+      if (demoMode) {
+        setCustomQuests((current) => current.map((item) => (item.id === id ? { ...item, ...demoCustomQuestFromInput({ ...item, ...input }), id } : item)));
+        setModal({ type: "notice", title: "ПРИВЫЧКА ОБНОВЛЕНА", body: "Изменения сохранены только в демо-режиме." });
+        return;
+      }
+
+      await updateCustomQuest(id, input);
+      await reloadQuestSurfaces();
+      setModal({ type: "notice", title: "ПРИВЫЧКА ОБНОВЛЕНА", body: "Новые правила будут применяться к будущим экземплярам." });
+    } catch (caught) {
+      setModal({ type: "notice", title: "ПРИВЫЧКА НЕ ОБНОВЛЕНА", body: caught instanceof Error ? caught.message : "Не удалось обновить привычку" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onToggleCustomQuest(template: CustomQuestTemplate) {
+    setBusyId(template.id);
+    try {
+      if (demoMode) {
+        setCustomQuests((current) => current.map((item) => (item.id === template.id ? { ...item, isActive: !item.isActive } : item)));
+        setModal({ type: "notice", title: template.isActive ? "ПРИВЫЧКА ОТКЛЮЧЕНА" : "ПРИВЫЧКА ВКЛЮЧЕНА", body: "Статус изменен только в демо-режиме." });
+        return;
+      }
+
+      if (template.isActive) {
+        await disableCustomQuest(template.id);
+      } else {
+        await enableCustomQuest(template.id);
+      }
+      await reloadQuestSurfaces();
+      setModal({ type: "notice", title: template.isActive ? "ПРИВЫЧКА ОТКЛЮЧЕНА" : "ПРИВЫЧКА ВКЛЮЧЕНА", body: "Дневные экземпляры будут создаваться по актуальному статусу." });
+    } catch (caught) {
+      setModal({ type: "notice", title: "СТАТУС НЕ ИЗМЕНЕН", body: caught instanceof Error ? caught.message : "Не удалось изменить статус привычки" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onDeleteCustomQuest(template: CustomQuestTemplate) {
+    setBusyId(template.id);
+    try {
+      if (demoMode) {
+        setCustomQuests((current) => current.filter((item) => item.id !== template.id));
+        setModal({ type: "notice", title: "ПРИВЫЧКА АРХИВИРОВАНА", body: "Шаблон удален только из демо-списка." });
+        return;
+      }
+
+      await deleteCustomQuest(template.id);
+      await reloadQuestSurfaces();
+      setModal({ type: "notice", title: "ПРИВЫЧКА АРХИВИРОВАНА", body: "История выполненных квестов сохранена." });
+    } catch (caught) {
+      setModal({ type: "notice", title: "АРХИВАЦИЯ НЕ УДАЛАСЬ", body: caught instanceof Error ? caught.message : "Не удалось архивировать привычку" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onDeleteTodayQuest(quest: Quest) {
+    setBusyId(quest.id);
+    try {
+      if (demoMode) {
+        setDashboard((current) => current ? { ...current, todayQuests: current.todayQuests.filter((item) => item.id !== quest.id) } : current);
+        setModal({ type: "notice", title: "КВЕСТ УДАЛЕН", body: "Сегодняшний экземпляр удален только в демо-режиме." });
+        return;
+      }
+
+      await deleteTodayCustomQuest(quest.id);
+      await refresh();
+      setModal({ type: "notice", title: "КВЕСТ УДАЛЕН", body: "Удален только сегодняшний активный экземпляр. История привычки не затронута." });
+    } catch (caught) {
+      setModal({ type: "notice", title: "КВЕСТ НЕ УДАЛЕН", body: caught instanceof Error ? caught.message : "Не удалось удалить сегодняшний квест" });
     } finally {
       setBusyId(null);
     }
@@ -670,6 +840,98 @@ export function App() {
     return current.todayQuests.filter((quest) => quest.type === "generated").length;
   }
 
+  function demoCustomQuestTemplates(): CustomQuestTemplate[] {
+    const now = new Date().toISOString();
+    return [
+      {
+        id: "demo-custom-reading",
+        userId: demoDashboard.profile.id,
+        title: "Читать 20 минут",
+        description: "Персональная привычка для спокойной прокачки интеллекта.",
+        category: "intelligence",
+        difficulty: "easy",
+        ...customQuestRewards("intelligence", "easy"),
+        recurrenceType: "daily",
+        weekdays: [],
+        startsAt: new Date().toISOString().slice(0, 10),
+        endsAt: null,
+        isActive: true,
+        deletedAt: null,
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "demo-custom-focus",
+        userId: demoDashboard.profile.id,
+        title: "Фокус-блок без телефона",
+        description: "Повторяется по будням.",
+        category: "focus",
+        difficulty: "medium",
+        ...customQuestRewards("focus", "medium"),
+        recurrenceType: "weekdays",
+        weekdays: [1, 2, 3, 4, 5],
+        startsAt: new Date().toISOString().slice(0, 10),
+        endsAt: null,
+        isActive: true,
+        deletedAt: null,
+        createdAt: now,
+        updatedAt: now
+      }
+    ];
+  }
+
+  function demoCustomQuestFromInput(input: CustomQuestInput): CustomQuestTemplate {
+    const now = new Date().toISOString();
+    return {
+      id: `demo-custom-${Date.now()}`,
+      userId: demoDashboard.profile.id,
+      title: input.title,
+      description: input.description ?? "",
+      category: input.category,
+      difficulty: input.difficulty,
+      ...customQuestRewards(input.category, input.difficulty),
+      recurrenceType: input.recurrenceType,
+      weekdays: input.weekdays ?? [],
+      startsAt: input.startsAt ?? now.slice(0, 10),
+      endsAt: input.endsAt ?? null,
+      isActive: input.isActive ?? true,
+      deletedAt: null,
+      createdAt: now,
+      updatedAt: now
+    };
+  }
+
+  function addDemoCustomQuestInstance(current: DashboardSummary, template: CustomQuestTemplate): DashboardSummary {
+    if (!template.isActive) return current;
+    const today = new Date().toISOString().slice(0, 10);
+    const quest: Quest = {
+      id: `demo-custom-quest-${Date.now()}`,
+      userId: current.profile.id,
+      title: template.title,
+      description: template.description,
+      type: "custom",
+      source: "custom",
+      customTemplateId: template.id,
+      category: template.category,
+      difficulty: template.difficulty,
+      xpReward: template.xpReward,
+      statRewardKey: template.statRewardKey,
+      statRewardValue: template.statRewardValue,
+      status: "active",
+      dueDate: today,
+      completedAt: null,
+      createdAt: new Date().toISOString(),
+      reason: "Пользовательский демо-квест."
+    };
+
+    return {
+      ...current,
+      todayQuests: current.todayQuests.some((item) => item.customTemplateId === template.id)
+        ? current.todayQuests
+        : [...current.todayQuests, quest]
+    };
+  }
+
   function buildDemoSystems(current: DashboardSummary): SystemsOverview {
     const unlockedKeys = new Set(["focus_i", "discipline_i"]);
     const nodes: SystemsOverview["skills"]["nodes"] = [
@@ -824,11 +1086,18 @@ export function App() {
             {view === "quests" ? (
               <QuestsView
                 quests={dashboard.todayQuests}
+                customQuests={customQuests}
+                customQuestsLoading={customQuestsLoading}
                 busyId={busyId}
                 onCompleteQuest={onCompleteQuest}
                 onSkipQuest={onSkipQuest}
                 onReplaceQuest={onReplaceQuest}
+                onDeleteTodayQuest={onDeleteTodayQuest}
                 onGenerateQuest={onGenerateQuest}
+                onCreateCustomQuest={onCreateCustomQuest}
+                onUpdateCustomQuest={onUpdateCustomQuest}
+                onToggleCustomQuest={onToggleCustomQuest}
+                onDeleteCustomQuest={onDeleteCustomQuest}
               />
             ) : null}
             {view === "stats" ? <StatsView dashboard={dashboard} /> : null}
@@ -1076,22 +1345,78 @@ function VitalCell({ icon, label, value, max }: { icon: ReactNode; label: string
 
 function QuestsView({
   quests,
+  customQuests,
+  customQuestsLoading,
   busyId,
   onCompleteQuest,
   onSkipQuest,
   onReplaceQuest,
-  onGenerateQuest
+  onDeleteTodayQuest,
+  onGenerateQuest,
+  onCreateCustomQuest,
+  onUpdateCustomQuest,
+  onToggleCustomQuest,
+  onDeleteCustomQuest
 }: {
   quests: Quest[];
+  customQuests: CustomQuestTemplate[];
+  customQuestsLoading: boolean;
   busyId: string | null;
   onCompleteQuest: (quest: Quest) => void;
   onSkipQuest: (quest: Quest) => void;
   onReplaceQuest: (quest: Quest) => void;
+  onDeleteTodayQuest: (quest: Quest) => void;
   onGenerateQuest: () => void;
+  onCreateCustomQuest: (input: CustomQuestInput) => void;
+  onUpdateCustomQuest: (id: string, input: Partial<CustomQuestInput>) => void;
+  onToggleCustomQuest: (template: CustomQuestTemplate) => void;
+  onDeleteCustomQuest: (template: CustomQuestTemplate) => void;
 }) {
+  const [formMode, setFormMode] = useState<"closed" | "create" | "edit">("closed");
+  const [editingTemplate, setEditingTemplate] = useState<CustomQuestTemplate | null>(null);
+
+  function startCreate() {
+    setEditingTemplate(null);
+    setFormMode("create");
+  }
+
+  function startEdit(template: CustomQuestTemplate) {
+    setEditingTemplate(template);
+    setFormMode("edit");
+  }
+
+  function closeForm() {
+    setEditingTemplate(null);
+    setFormMode("closed");
+  }
+
   return (
     <div className="space-y-3">
       <ScreenTitle title="Ежедневные квесты" icon={<ListChecks size={20} />} />
+      <div className="grid grid-cols-2 gap-2">
+        <PrimaryButton onClick={startCreate}>Создать квест</PrimaryButton>
+        <PrimaryButton disabled={busyId === "generate"} onClick={onGenerateQuest} variant="ghost">
+          Новый системный
+        </PrimaryButton>
+      </div>
+
+      {formMode !== "closed" ? (
+        <CustomQuestForm
+          mode={formMode}
+          template={editingTemplate}
+          busy={busyId === "custom-create" || busyId === editingTemplate?.id}
+          onCancel={closeForm}
+          onSubmit={(input) => {
+            if (editingTemplate) {
+              onUpdateCustomQuest(editingTemplate.id, input);
+            } else {
+              onCreateCustomQuest(input);
+            }
+            closeForm();
+          }}
+        />
+      ) : null}
+
       {quests.map((quest) => (
         <Panel key={quest.id} className={questPanelClass(quest.status)}>
           <div className="flex items-start justify-between gap-3">
@@ -1133,12 +1458,191 @@ function QuestsView({
               Заменить
             </PrimaryButton>
           </div>
+          {quest.type === "custom" && quest.status === "active" ? (
+            <PrimaryButton
+              disabled={busyId === quest.id}
+              onClick={() => onDeleteTodayQuest(quest)}
+              variant="ghost"
+            >
+              Удалить только сегодня
+            </PrimaryButton>
+          ) : null}
         </Panel>
       ))}
-      <PrimaryButton disabled={busyId === "generate"} onClick={onGenerateQuest} variant="ghost">
-        Создать квест
-      </PrimaryButton>
+
+      <Panel>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="font-mono text-xs font-bold uppercase text-system-cyan">Мои привычки</p>
+            <p className="mt-1 text-sm text-system-muted">Шаблоны создают реальные квесты на нужные дни. История выполнений не удаляется.</p>
+          </div>
+          <span className="font-mono text-xs text-system-muted">{customQuestsLoading ? "Загрузка" : `${customQuests.length}`}</span>
+        </div>
+        <div className="space-y-2">
+          {customQuests.length === 0 ? (
+            <p className="text-sm text-system-muted">Пока нет пользовательских привычек. Создай первый квест и выбери повторение.</p>
+          ) : (
+            customQuests.map((template) => (
+              <div key={template.id} className={`border px-3 py-3 ${template.isActive ? "border-system-cyan/35 bg-black/20" : "border-system-border bg-black/10 opacity-75"}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="font-bold">{template.title}</h3>
+                    <p className="mt-1 text-sm text-system-muted">{template.description || "Без описания"}</p>
+                    <p className="mt-2 font-mono text-[10px] uppercase text-system-cyan">
+                      {CATEGORY_LABELS_RU[template.category]} / {DIFFICULTY_LABELS_RU[template.difficulty]} / {recurrenceLabel(template)}
+                    </p>
+                    <p className="mt-1 text-xs text-system-muted">
+                      +{template.xpReward} XP, +{template.statRewardValue} {STAT_LABELS_RU[template.statRewardKey].short}
+                    </p>
+                  </div>
+                  <StatusBadge active={template.isActive} />
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <PrimaryButton disabled={busyId === template.id} onClick={() => startEdit(template)} variant="ghost">Изменить</PrimaryButton>
+                  <PrimaryButton disabled={busyId === template.id} onClick={() => onToggleCustomQuest(template)} variant="ghost">
+                    {template.isActive ? "Отключить" : "Включить"}
+                  </PrimaryButton>
+                  <PrimaryButton disabled={busyId === template.id} onClick={() => onDeleteCustomQuest(template)} variant="danger">Удалить</PrimaryButton>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </Panel>
     </div>
+  );
+}
+
+function CustomQuestForm({
+  mode,
+  template,
+  busy,
+  onCancel,
+  onSubmit
+}: {
+  mode: "create" | "edit";
+  template: CustomQuestTemplate | null;
+  busy: boolean;
+  onCancel: () => void;
+  onSubmit: (input: CustomQuestInput) => void;
+}) {
+  const [title, setTitle] = useState(template?.title ?? "");
+  const [description, setDescription] = useState(template?.description ?? "");
+  const [category, setCategory] = useState<Quest["category"]>(template?.category ?? "focus");
+  const [difficulty, setDifficulty] = useState<Quest["difficulty"]>(template?.difficulty ?? "easy");
+  const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>(template?.recurrenceType ?? "daily");
+  const [weekdays, setWeekdays] = useState<Weekday[]>(template?.weekdays ?? []);
+  const [error, setError] = useState<string | null>(null);
+  const rewards = customQuestRewards(category, difficulty);
+
+  function toggleWeekday(day: Weekday) {
+    setWeekdays((current) => current.includes(day) ? current.filter((item) => item !== day) : [...current, day].sort());
+  }
+
+  function submit() {
+    if (title.trim().length < 2) {
+      setError("Название должно быть не короче 2 символов.");
+      return;
+    }
+    if (recurrenceType === "weekdays" && weekdays.length === 0) {
+      setError("Выбери хотя бы один день недели.");
+      return;
+    }
+
+    setError(null);
+    onSubmit({
+      title: title.trim(),
+      description: description.trim(),
+      category,
+      difficulty,
+      recurrenceType,
+      weekdays: recurrenceType === "weekdays" ? weekdays : [],
+      isActive: template?.isActive ?? true
+    });
+  }
+
+  return (
+    <Panel glow>
+      <p className="font-mono text-xs font-bold uppercase text-system-cyan">
+        {mode === "create" ? "Новый пользовательский квест" : "Редактирование привычки"}
+      </p>
+      <div className="mt-3 space-y-3">
+        <label className="block">
+          <span className="font-mono text-[10px] uppercase text-system-muted">Название</span>
+          <input className="mt-1 w-full border border-system-border bg-black/30 px-3 py-2 text-sm text-system-text outline-none focus-visible:border-system-cyan" value={title} onChange={(event) => setTitle(event.target.value)} />
+        </label>
+        <label className="block">
+          <span className="font-mono text-[10px] uppercase text-system-muted">Описание</span>
+          <textarea className="mt-1 min-h-20 w-full border border-system-border bg-black/30 px-3 py-2 text-sm text-system-text outline-none focus-visible:border-system-cyan" value={description} onChange={(event) => setDescription(event.target.value)} />
+        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <SelectField label="Категория" value={category} onChange={(value) => setCategory(value as Quest["category"])}>
+            {STAT_KEYS.map((key) => <option key={key} value={key}>{CATEGORY_LABELS_RU[key]}</option>)}
+          </SelectField>
+          <SelectField label="Сложность" value={difficulty} onChange={(value) => setDifficulty(value as Quest["difficulty"])}>
+            {(["easy", "medium", "hard"] as const).map((key) => <option key={key} value={key}>{DIFFICULTY_LABELS_RU[key]}</option>)}
+          </SelectField>
+        </div>
+        <SelectField label="Повторение" value={recurrenceType} onChange={(value) => setRecurrenceType(value as RecurrenceType)}>
+          {(["once", "daily", "weekly", "weekdays"] as const).map((key) => <option key={key} value={key}>{RECURRENCE_LABELS_RU[key]}</option>)}
+        </SelectField>
+        {recurrenceType === "weekdays" ? (
+          <div>
+            <p className="font-mono text-[10px] uppercase text-system-muted">Дни недели</p>
+            <div className="mt-2 grid grid-cols-7 gap-1">
+              {WEEKDAY_LABELS_RU.map((day) => (
+                <button
+                  key={day.value}
+                  type="button"
+                  onClick={() => toggleWeekday(day.value)}
+                  className={`border px-1 py-2 text-xs font-bold ${weekdays.includes(day.value) ? "border-system-cyan bg-system-cyan/15 text-system-cyan" : "border-system-border bg-black/25 text-system-muted"}`}
+                >
+                  {day.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        <div className="grid grid-cols-2 gap-2">
+          <Metric label="XP" value={`+${rewards.xpReward}`} accent="text-system-warning" />
+          <Metric label={STAT_LABELS_RU[rewards.statRewardKey].short} value={`+${rewards.statRewardValue}`} accent="text-system-cyan" />
+        </div>
+        {error ? <p className="text-sm text-system-danger">{error}</p> : null}
+        <div className="grid grid-cols-2 gap-2">
+          <PrimaryButton disabled={busy} onClick={submit}>{mode === "create" ? "Создать" : "Сохранить"}</PrimaryButton>
+          <PrimaryButton disabled={busy} onClick={onCancel} variant="ghost">Отмена</PrimaryButton>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  children
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="font-mono text-[10px] uppercase text-system-muted">{label}</span>
+      <select className="mt-1 w-full border border-system-border bg-black/30 px-3 py-2 text-sm text-system-text outline-none focus-visible:border-system-cyan" value={value} onChange={(event) => onChange(event.target.value)}>
+        {children}
+      </select>
+    </label>
+  );
+}
+
+function StatusBadge({ active }: { active: boolean }) {
+  return (
+    <span className={`shrink-0 border px-2 py-1 font-mono text-[10px] font-bold uppercase ${active ? "border-system-success/60 text-system-success" : "border-system-border text-system-muted"}`}>
+      {active ? "Активна" : "Откл."}
+    </span>
   );
 }
 

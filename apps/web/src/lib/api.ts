@@ -1,6 +1,8 @@
 import type {
   AuthResponse,
   BossProgressResult,
+  CustomQuestInput,
+  CustomQuestTemplate,
   DashboardSummary,
   ProgressHistory,
   Quest,
@@ -73,6 +75,48 @@ export function updateSettings(input: Partial<UserSettings>) {
   return request<UserSettings>("/api/settings", {
     method: "POST",
     body: JSON.stringify(input)
+  });
+}
+
+export function getCustomQuests() {
+  return request<CustomQuestTemplate[]>("/api/custom-quests");
+}
+
+export function createCustomQuest(input: CustomQuestInput) {
+  return request<CustomQuestTemplate>("/api/custom-quests", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function updateCustomQuest(id: string, input: Partial<CustomQuestInput>) {
+  return request<CustomQuestTemplate>(`/api/custom-quests/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export function disableCustomQuest(id: string) {
+  return request<CustomQuestTemplate>(`/api/custom-quests/${id}/disable`, {
+    method: "POST"
+  });
+}
+
+export function enableCustomQuest(id: string) {
+  return request<CustomQuestTemplate>(`/api/custom-quests/${id}/enable`, {
+    method: "POST"
+  });
+}
+
+export function deleteCustomQuest(id: string) {
+  return request<CustomQuestTemplate>(`/api/custom-quests/${id}`, {
+    method: "DELETE"
+  });
+}
+
+export function deleteTodayCustomQuest(id: string) {
+  return request<{ deleted: boolean }>(`/api/quests/${id}`, {
+    method: "DELETE"
   });
 }
 
@@ -225,7 +269,19 @@ function translateApiMessage(message?: string) {
     "Settings storage is not ready": "Хранилище настроек еще не обновлено. Примени новую миграцию Supabase и повтори.",
     "Unable to load settings": "Не удалось загрузить настройки",
     "Unable to create settings": "Не удалось создать настройки",
-    "Unable to update settings": "Не удалось сохранить настройки"
+    "Unable to update settings": "Не удалось сохранить настройки",
+    "Custom quests storage is not ready": "Хранилище пользовательских квестов еще не обновлено. Примени новую миграцию Supabase.",
+    "Unable to load custom quests": "Не удалось загрузить мои квесты",
+    "Unable to create custom quest": "Не удалось создать привычку",
+    "Unable to update custom quest": "Не удалось обновить привычку",
+    "Unable to delete custom quest": "Не удалось архивировать привычку",
+    "Unable to disable custom quest": "Не удалось отключить привычку",
+    "Unable to enable custom quest": "Не удалось включить привычку",
+    "Custom quest not found": "Привычка не найдена",
+    "Choose at least one weekday": "Выбери хотя бы один день недели",
+    "Completed quest history is preserved": "Нельзя удалить выполненный квест: история сохранена",
+    "Only today's custom quest can be deleted": "Удалить можно только сегодняшний активный пользовательский квест",
+    "Unable to delete today's custom quest": "Не удалось удалить сегодняшний квест"
   };
 
   return knownMessages[message] ?? message;

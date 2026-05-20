@@ -34,6 +34,14 @@ export const CATEGORY_TO_STAT: Record<QuestCategory, StatKey> = {
   charisma: "charisma"
 };
 
+export function customQuestRewards(category: QuestCategory, difficulty: Difficulty) {
+  return {
+    xpReward: XP_REWARDS[difficulty],
+    statRewardKey: CATEGORY_TO_STAT[category],
+    statRewardValue: difficulty === "hard" ? 2 : 1
+  };
+}
+
 export function xpToNextLevel(level: number): number {
   return Math.round(100 * Math.pow(level, 1.35));
 }

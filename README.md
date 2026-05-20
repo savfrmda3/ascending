@@ -83,6 +83,7 @@ Without the Supabase CLI, run these files in Supabase SQL Editor:
 - `supabase/migrations/20260519000000_p0_progression_safety.sql`
 - `supabase/migrations/20260519010000_user_settings_onboarding.sql`
 - `supabase/migrations/20260519020000_product_expansion_systems.sql`
+- `supabase/migrations/20260520000000_custom_quest_habits.sql`
 - `supabase/seed.sql`
 
 The app uses `SUPABASE_SERVICE_ROLE_KEY` only inside Vercel serverless functions. Do not expose it to browser-side code. The `/api/debug/supabase` endpoint is disabled in production unless `ENABLE_SUPABASE_DEBUG=true` is set intentionally.
@@ -151,6 +152,12 @@ Rewards now affect more than XP:
 
 The standalone bot also has `/systems` and `/settings`. In the recommended Vercel setup the webhook bot commands are configured by `/api/telegram/setup`.
 
+## Custom Quests And Habits
+
+Users can create their own recurring quests in the Mini App. A custom quest template stores the rule (`once`, `daily`, `weekly`, or selected weekdays), while the normal `quests` table stores the concrete daily instance. Rewards are calculated by difficulty on the backend, so users cannot manually inflate XP.
+
+Apply `20260520000000_custom_quest_habits.sql` before enabling this in production. It adds `custom_quest_templates`, extends `quests.type` with `custom`, and links daily custom quest instances through `custom_template_id`.
+
 ## Main Endpoints
 
 - `GET /api/health`
@@ -159,6 +166,7 @@ The standalone bot also has `/systems` and `/settings`. In the recommended Verce
 - `GET /api/profile`
 - `GET /api/stats`
 - `GET /api/quests/today`
+- `DELETE /api/quests/:id`
 - `POST /api/quests/generate`
 - `POST /api/quests/:id/complete`
 - `POST /api/quests/:id/skip`
@@ -167,6 +175,12 @@ The standalone bot also has `/systems` and `/settings`. In the recommended Verce
 - `POST /api/boss/:id/progress`
 - `GET /api/achievements`
 - `GET /api/progress/history`
+- `GET /api/custom-quests`
+- `POST /api/custom-quests`
+- `PATCH /api/custom-quests/:id`
+- `DELETE /api/custom-quests/:id`
+- `POST /api/custom-quests/:id/disable`
+- `POST /api/custom-quests/:id/enable`
 - `GET /api/systems`
 - `POST /api/skills/:key/unlock`
 - `POST /api/squad/create`

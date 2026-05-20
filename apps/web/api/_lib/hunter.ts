@@ -4,6 +4,7 @@ import {
   XP_REWARDS,
   applyXp,
   classForStats,
+  customQuestRewards,
   rankForLevel,
   xpToNextLevel,
   type AdminOverview,
@@ -13,6 +14,8 @@ import {
   type BossProgressResult,
   type DashboardSummary,
   type Difficulty,
+  type CustomQuestInput,
+  type CustomQuestTemplate,
   type HunterGoal,
   type InventoryCatalogItem,
   type InventorySummary,
@@ -32,6 +35,7 @@ import {
   type SystemsOverview,
   type UserSettings,
   type UserStats,
+  type Weekday,
   type WeeklyRecap,
   type WeeklyBoss
 } from "@system-hunter/shared";
@@ -58,6 +62,7 @@ const DAILY_RECOVERY_HP = 5;
 let timezoneColumnsAvailable: boolean | null = null;
 let userSettingsTableAvailable: boolean | null = null;
 let expansionTablesAvailable: boolean | null = null;
+let customQuestTablesAvailable: boolean | null = null;
 
 interface AchievementCatalogItem {
   title: string;
@@ -180,6 +185,8 @@ const USER_STATS_COLUMNS =
   "id,user_id,strength,intelligence,vitality,discipline,focus,charisma,created_at,updated_at";
 const QUEST_COLUMNS =
   "id,user_id,title,description,type,category,difficulty,xp_reward,stat_reward_key,stat_reward_value,status,due_date,completed_at,created_at";
+const CUSTOM_QUEST_COLUMNS =
+  "id,user_id,title,description,category,difficulty,xp_reward,stat_reward_key,stat_reward_value,recurrence_type,weekdays,starts_at,ends_at,is_active,deleted_at,created_at,updated_at";
 const BOSS_COLUMNS =
   "id,user_id,name,description,objective,progress,target,xp_reward,stat_reward_key,stat_reward_value,status,starts_at,ends_at,completed_at,created_at";
 const ACHIEVEMENT_COLUMNS = "id,user_id,key,title,description,unlocked_at";
@@ -360,6 +367,166 @@ export class HunterService {
 
     userSettingsTableAvailable = true;
     return toSettings(data);
+  }
+
+  async getCustomQuests(userId: string): Promise<CustomQuestTemplate[]> {
+    if (customQuestTablesAvailable === false) return [];
+
+    const { data, error } = await supabase
+      .from("custom_quest_templates")
+      .select(CUSTOM_QUEST_COLUMNS)
+      .eq("user_id", userId)
+      .is("deleted_at", null)
+      .order("is_active", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      if (isMissingCustomQuestSchema(error)) {
+        customQuestTablesAvailable = false;
+        throw badRequest("Custom quests storage is not ready", error);
+      }
+      throw badRequest("Unable to load custom quests", error);
+    }
+
+    customQuestTablesAvailable = true;
+    return (data ?? []).map(toCustomQuestTemplate);
+  }
+
+  async createCustomQuest(userId: string, input: CustomQuestInput): Promise<CustomQuestTemplate> {
+    if (customQuestTablesAvailable === false) throw badRequest("Custom quests storage is not ready");
+    const prepared = await this.prepareCustomQuestInput(userId, input);
+
+    const { data, error } = await supabase
+      .from("custom_quest_templates")
+      .insert({
+        user_id: userId,
+        title: prepared.title,
+        description: prepared.description,
+        category: prepared.category,
+        difficulty: prepared.difficulty,
+        xp_reward: prepared.xpReward,
+        stat_reward_key: prepared.statRewardKey,
+        stat_reward_value: prepared.statRewardValue,
+        recurrence_type: prepared.recurrenceType,
+        weekdays: prepared.weekdays,
+        starts_at: prepared.startsAt,
+        ends_at: prepared.endsAt,
+        is_active: prepared.isActive
+      })
+      .select(CUSTOM_QUEST_COLUMNS)
+      .single();
+
+    if (error || !data) {
+      if (isMissingCustomQuestSchema(error)) {
+        customQuestTablesAvailable = false;
+        throw badRequest("Custom quests storage is not ready", error);
+      }
+      throw badRequest("Unable to create custom quest", error);
+    }
+
+    customQuestTablesAvailable = true;
+    const template = toCustomQuestTemplate(data);
+    await this.ensureCustomQuestInstances(userId);
+    return template;
+  }
+
+  async updateCustomQuest(userId: string, templateId: string, input: Partial<CustomQuestInput>): Promise<CustomQuestTemplate> {
+    const current = await this.getCustomQuestTemplate(userId, templateId);
+    const merged: CustomQuestInput = {
+      title: input.title ?? current.title,
+      description: input.description ?? current.description,
+      category: input.category ?? current.category,
+      difficulty: input.difficulty ?? current.difficulty,
+      recurrenceType: input.recurrenceType ?? current.recurrenceType,
+      weekdays: input.weekdays ?? current.weekdays,
+      startsAt: input.startsAt === undefined ? current.startsAt : input.startsAt,
+      endsAt: input.endsAt === undefined ? current.endsAt : input.endsAt,
+      isActive: input.isActive ?? current.isActive
+    };
+    const prepared = await this.prepareCustomQuestInput(userId, merged);
+
+    const { data, error } = await supabase
+      .from("custom_quest_templates")
+      .update({
+        title: prepared.title,
+        description: prepared.description,
+        category: prepared.category,
+        difficulty: prepared.difficulty,
+        xp_reward: prepared.xpReward,
+        stat_reward_key: prepared.statRewardKey,
+        stat_reward_value: prepared.statRewardValue,
+        recurrence_type: prepared.recurrenceType,
+        weekdays: prepared.weekdays,
+        starts_at: prepared.startsAt,
+        ends_at: prepared.endsAt,
+        is_active: prepared.isActive,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", templateId)
+      .eq("user_id", userId)
+      .is("deleted_at", null)
+      .select(CUSTOM_QUEST_COLUMNS)
+      .maybeSingle();
+
+    if (error) throw badRequest("Unable to update custom quest", error);
+    if (!data) throw notFound("Custom quest not found");
+    await this.ensureCustomQuestInstances(userId);
+    return toCustomQuestTemplate(data);
+  }
+
+  async disableCustomQuest(userId: string, templateId: string) {
+    return this.setCustomQuestActive(userId, templateId, false);
+  }
+
+  async enableCustomQuest(userId: string, templateId: string) {
+    const template = await this.setCustomQuestActive(userId, templateId, true);
+    await this.ensureCustomQuestInstances(userId);
+    return template;
+  }
+
+  async deleteCustomQuest(userId: string, templateId: string) {
+    const { data, error } = await supabase
+      .from("custom_quest_templates")
+      .update({ is_active: false, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq("id", templateId)
+      .eq("user_id", userId)
+      .is("deleted_at", null)
+      .select(CUSTOM_QUEST_COLUMNS)
+      .maybeSingle();
+
+    if (error) throw badRequest("Unable to delete custom quest", error);
+    if (!data) throw notFound("Custom quest not found");
+    return toCustomQuestTemplate(data);
+  }
+
+  async deleteTodayCustomQuest(userId: string, questId: string) {
+    const { today } = await this.getDateContext(userId);
+    const { data: quest, error: loadError } = await supabase
+      .from("quests")
+      .select("id,user_id,type,status,due_date,custom_template_id")
+      .eq("id", questId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (loadError) {
+      if (isMissingCustomQuestSchema(loadError)) throw badRequest("Custom quests storage is not ready", loadError);
+      throw badRequest("Unable to load quest", loadError);
+    }
+    if (!quest) throw notFound("Quest not found");
+    if (quest.status === "completed") throw conflict("Completed quest history is preserved");
+    if (quest.status !== "active") throw conflict("Quest is not active");
+    if (quest.type !== "custom" || !quest.custom_template_id) throw conflict("Only today's custom quest can be deleted");
+    if (quest.due_date !== today) throw conflict("Only today's custom quest can be deleted");
+
+    const { error } = await supabase
+      .from("quests")
+      .delete()
+      .eq("id", questId)
+      .eq("user_id", userId)
+      .eq("status", "active");
+
+    if (error) throw badRequest("Unable to delete today's custom quest", error);
+    return { deleted: true };
   }
 
   async generateQuest(userId: string) {
@@ -1115,37 +1282,177 @@ export class HunterService {
     return toSettings(created);
   }
 
+  private async getCustomQuestTemplate(userId: string, templateId: string): Promise<CustomQuestTemplate> {
+    const { data, error } = await supabase
+      .from("custom_quest_templates")
+      .select(CUSTOM_QUEST_COLUMNS)
+      .eq("id", templateId)
+      .eq("user_id", userId)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingCustomQuestSchema(error)) {
+        customQuestTablesAvailable = false;
+        throw badRequest("Custom quests storage is not ready", error);
+      }
+      throw badRequest("Unable to load custom quest", error);
+    }
+    if (!data) throw notFound("Custom quest not found");
+
+    customQuestTablesAvailable = true;
+    return toCustomQuestTemplate(data);
+  }
+
+  private async setCustomQuestActive(userId: string, templateId: string, isActive: boolean) {
+    const { data, error } = await supabase
+      .from("custom_quest_templates")
+      .update({ is_active: isActive, updated_at: new Date().toISOString() })
+      .eq("id", templateId)
+      .eq("user_id", userId)
+      .is("deleted_at", null)
+      .select(CUSTOM_QUEST_COLUMNS)
+      .maybeSingle();
+
+    if (error) throw badRequest(isActive ? "Unable to enable custom quest" : "Unable to disable custom quest", error);
+    if (!data) throw notFound("Custom quest not found");
+    return toCustomQuestTemplate(data);
+  }
+
+  private async prepareCustomQuestInput(userId: string, input: CustomQuestInput) {
+    const { today } = await this.getDateContext(userId);
+    const recurrenceType = input.recurrenceType;
+    const weekdays = uniqueWeekdays(input.weekdays ?? []);
+    if (recurrenceType === "weekdays" && weekdays.length === 0) {
+      throw badRequest("Choose at least one weekday");
+    }
+
+    const rewards = customQuestRewards(input.category, input.difficulty);
+    return {
+      title: input.title.trim(),
+      description: (input.description ?? "").trim(),
+      category: input.category,
+      difficulty: input.difficulty,
+      recurrenceType,
+      weekdays: recurrenceType === "weekdays" ? weekdays : [],
+      startsAt: input.startsAt ?? today,
+      endsAt: input.endsAt ?? null,
+      isActive: input.isActive ?? true,
+      ...rewards
+    };
+  }
+
   private async ensureDailyQuests(userId: string) {
     const { today } = await this.getDateContext(userId);
     const { data, error } = await supabase
       .from("quests")
-      .select("id")
+      .select("id,type")
       .eq("user_id", userId)
       .eq("due_date", today)
+      .neq("type", "custom")
       .limit(1);
 
     if (error) throw badRequest("Unable to inspect quests", error);
-    if ((data ?? []).length > 0) return;
+    if ((data ?? []).length === 0) {
+      await this.adjustVitals(userId, { hpDelta: DAILY_RECOVERY_HP, energyDelta: DAILY_RECOVERY_ENERGY });
+      const settings = await this.getSettings(userId);
+      const templates = await this.getPersonalizedQuestTemplates(userId, settings);
+      const rows = pickRandomUniqueTemplates(templates, settings.questsPerDay, new Set()).map((template) => ({
+        user_id: userId,
+        title: template.title,
+        description: template.description,
+        type: "daily",
+        source: "system",
+        category: template.category,
+        difficulty: template.difficulty,
+        xp_reward: template.xpReward,
+        stat_reward_key: template.statRewardKey,
+        stat_reward_value: template.statRewardValue,
+        due_date: today
+      }));
 
-    await this.adjustVitals(userId, { hpDelta: DAILY_RECOVERY_HP, energyDelta: DAILY_RECOVERY_ENERGY });
-    const settings = await this.getSettings(userId);
-    const templates = await this.getPersonalizedQuestTemplates(userId, settings);
-    const rows = pickRandomUniqueTemplates(templates, settings.questsPerDay, new Set()).map((template) => ({
-      user_id: userId,
-      title: template.title,
-      description: template.description,
-      type: "daily",
-      category: template.category,
-      difficulty: template.difficulty,
-      xp_reward: template.xpReward,
-      stat_reward_key: template.statRewardKey,
-      stat_reward_value: template.statRewardValue,
-      due_date: today
-    }));
+      if (rows.length === 0) throw badRequest("No quest templates are available");
+      const { error: insertError } = await supabase.from("quests").insert(rows);
+      if (insertError) {
+        if (isMissingCustomQuestSchema(insertError)) {
+          const fallbackRows = rows.map(({ source, ...row }) => row);
+          const { error: fallbackError } = await supabase.from("quests").insert(fallbackRows);
+          if (fallbackError) throw badRequest("Unable to create quests", fallbackError);
+        } else {
+          throw badRequest("Unable to create quests", insertError);
+        }
+      }
+    }
 
-    if (rows.length === 0) throw badRequest("No quest templates are available");
+    await this.ensureCustomQuestInstances(userId, today);
+  }
+
+  private async ensureCustomQuestInstances(userId: string, date?: string) {
+    if (customQuestTablesAvailable === false) return;
+    const { today } = date ? { today: date } : await this.getDateContext(userId);
+    const { data: templates, error } = await supabase
+      .from("custom_quest_templates")
+      .select(CUSTOM_QUEST_COLUMNS)
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .is("deleted_at", null);
+
+    if (error) {
+      if (isMissingCustomQuestSchema(error)) {
+        customQuestTablesAvailable = false;
+        return;
+      }
+      throw badRequest("Unable to load custom quests", error);
+    }
+
+    customQuestTablesAvailable = true;
+    const dueTemplates = (templates ?? []).map(toCustomQuestTemplate).filter((template) => shouldCreateCustomQuestToday(template, today));
+    if (dueTemplates.length === 0) return;
+
+    const { data: existing, error: existingError } = await supabase
+      .from("quests")
+      .select("custom_template_id")
+      .eq("user_id", userId)
+      .eq("due_date", today)
+      .not("custom_template_id", "is", null);
+
+    if (existingError) {
+      if (isMissingCustomQuestSchema(existingError)) {
+        customQuestTablesAvailable = false;
+        return;
+      }
+      throw badRequest("Unable to inspect custom quests", existingError);
+    }
+
+    const existingTemplateIds = new Set((existing ?? []).map((row: any) => String(row.custom_template_id)));
+    const rows = dueTemplates
+      .filter((template) => !existingTemplateIds.has(template.id))
+      .map((template) => ({
+        user_id: userId,
+        title: template.title,
+        description: template.description,
+        type: "custom",
+        source: "custom",
+        custom_template_id: template.id,
+        category: template.category,
+        difficulty: template.difficulty,
+        xp_reward: template.xpReward,
+        stat_reward_key: template.statRewardKey,
+        stat_reward_value: template.statRewardValue,
+        due_date: today,
+        reason: customQuestReason(template)
+      }));
+
+    if (rows.length === 0) return;
     const { error: insertError } = await supabase.from("quests").insert(rows);
-    if (insertError) throw badRequest("Unable to create quests", insertError);
+    if (insertError?.code === "23505") return;
+    if (insertError) {
+      if (isMissingCustomQuestSchema(insertError)) {
+        customQuestTablesAvailable = false;
+        return;
+      }
+      throw badRequest("Unable to create custom quests", insertError);
+    }
   }
 
   private async ensureWeeklyBoss(userId: string) {
@@ -1212,6 +1519,7 @@ export class HunterService {
         title: template.title,
         description: template.description,
         type: "generated",
+        source: "generated",
         category: template.category,
         difficulty: template.difficulty,
         xp_reward: template.xpReward,
@@ -1223,6 +1531,26 @@ export class HunterService {
       .single();
 
     if (error?.code === "23505") throw conflict("Quest already exists today");
+    if (error && isMissingCustomQuestSchema(error)) {
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from("quests")
+        .insert({
+          user_id: userId,
+          title: template.title,
+          description: template.description,
+          type: "generated",
+          category: template.category,
+          difficulty: template.difficulty,
+          xp_reward: template.xpReward,
+          stat_reward_key: template.statRewardKey,
+          stat_reward_value: template.statRewardValue,
+          due_date: today
+        })
+        .select(QUEST_COLUMNS)
+        .single();
+      if (fallbackError || !fallbackData) throw badRequest("Unable to generate quest", fallbackError);
+      return toQuest(fallbackData);
+    }
     if (error || !data) throw badRequest("Unable to generate quest", error);
     return toQuest(data);
   }
@@ -1764,6 +2092,28 @@ function toSettings(row: any): UserSettings {
   };
 }
 
+function toCustomQuestTemplate(row: any): CustomQuestTemplate {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    title: row.title,
+    description: row.description ?? "",
+    category: row.category,
+    difficulty: row.difficulty,
+    xpReward: row.xp_reward,
+    statRewardKey: row.stat_reward_key,
+    statRewardValue: row.stat_reward_value,
+    recurrenceType: row.recurrence_type,
+    weekdays: uniqueWeekdays(row.weekdays ?? []),
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    isActive: row.is_active,
+    deletedAt: row.deleted_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
 function defaultSettings(userId: string): UserSettings {
   const now = new Date().toISOString();
   return {
@@ -1812,6 +2162,48 @@ function questTemplateKey(title: string, category: string) {
   return `${category.trim().toLowerCase()}::${title.trim().toLowerCase()}`;
 }
 
+function uniqueWeekdays(value: unknown): Weekday[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((item) => Number(item)).filter((item): item is Weekday => item >= 1 && item <= 7))]
+    .sort((left, right) => left - right);
+}
+
+function shouldCreateCustomQuestToday(template: CustomQuestTemplate, today: string) {
+  if (!template.isActive || template.deletedAt) return false;
+  if (template.startsAt && today < template.startsAt) return false;
+  if (template.endsAt && today > template.endsAt) return false;
+
+  const weekday = isoWeekday(today);
+  const startWeekday = isoWeekday(template.startsAt ?? today);
+  switch (template.recurrenceType) {
+    case "once":
+      return today === (template.startsAt ?? today);
+    case "daily":
+      return true;
+    case "weekly":
+      return weekday === startWeekday;
+    case "weekdays":
+      return template.weekdays.includes(weekday);
+    default:
+      return false;
+  }
+}
+
+function isoWeekday(date: string): Weekday {
+  const day = new Date(`${date}T00:00:00.000Z`).getUTCDay();
+  return (day === 0 ? 7 : day) as Weekday;
+}
+
+function customQuestReason(template: CustomQuestTemplate) {
+  const recurrenceLabels: Record<CustomQuestTemplate["recurrenceType"], string> = {
+    once: "одноразовый пользовательский квест",
+    daily: "ежедневная привычка",
+    weekly: "еженедельная привычка",
+    weekdays: "привычка по выбранным дням"
+  };
+  return `Пользовательский протокол: ${recurrenceLabels[template.recurrenceType]}.`;
+}
+
 function isMissingTimezoneColumn(error: unknown) {
   const record = error as { code?: string; message?: string };
   return (
@@ -1839,6 +2231,18 @@ function isMissingExpansionTable(error: unknown) {
     record.code === "PGRST205" ||
     ["skill_nodes", "user_skills", "inventory_items", "user_inventory", "seasons", "season_progress", "squads", "squad_members"]
       .some((table) => message.includes(table))
+  );
+}
+
+function isMissingCustomQuestSchema(error: unknown) {
+  const record = error as { code?: string; message?: string };
+  const message = String(record?.message ?? "");
+  return (
+    record?.code === "42P01" ||
+    record?.code === "42703" ||
+    record?.code === "PGRST204" ||
+    record?.code === "PGRST205" ||
+    ["custom_quest_templates", "custom_template_id", "quests.source", "source", "reason"].some((item) => message.includes(item))
   );
 }
 

@@ -1,4 +1,6 @@
 import {
+  customQuestTemplateSchema,
+  customQuestTemplateUpdateSchema,
   keyParamSchema,
   squadCreateSchema,
   squadJoinSchema,
@@ -123,6 +125,12 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
     return { data: await hunterService.getTodayQuests(session.userId) };
   }
 
+  if (method === "DELETE" && segments[0] === "quests" && segments.length === 2) {
+    rateLimit(req, `quests:delete:${session.userId}`, 12, 60_000);
+    const params = uuidParamSchema.parse({ id: segments[1] });
+    return { data: await hunterService.deleteTodayCustomQuest(session.userId, params.id) };
+  }
+
   if (method === "POST" && path === "quests/generate") {
     rateLimit(req, `quests:generate:${session.userId}`, 8, 60_000);
     return { data: await hunterService.generateQuest(session.userId), status: 201 };
@@ -162,6 +170,41 @@ async function dispatch(req: ApiRequest): Promise<{ data: unknown; status?: numb
 
   if (method === "GET" && path === "progress/history") {
     return { data: await hunterService.getProgressHistory(session.userId) };
+  }
+
+  if (method === "GET" && path === "custom-quests") {
+    return { data: await hunterService.getCustomQuests(session.userId) };
+  }
+
+  if (method === "POST" && path === "custom-quests") {
+    rateLimit(req, `custom-quests:create:${session.userId}`, 10, 60_000);
+    const body = customQuestTemplateSchema.parse(await readBody(req));
+    return { data: await hunterService.createCustomQuest(session.userId, body), status: 201 };
+  }
+
+  if (segments[0] === "custom-quests" && segments[1] && method === "PATCH") {
+    rateLimit(req, `custom-quests:update:${session.userId}`, 20, 60_000);
+    const params = uuidParamSchema.parse({ id: segments[1] });
+    const body = customQuestTemplateUpdateSchema.parse(await readBody(req));
+    return { data: await hunterService.updateCustomQuest(session.userId, params.id, body) };
+  }
+
+  if (segments[0] === "custom-quests" && segments[1] && segments[2] === "disable" && method === "POST") {
+    rateLimit(req, `custom-quests:disable:${session.userId}`, 20, 60_000);
+    const params = uuidParamSchema.parse({ id: segments[1] });
+    return { data: await hunterService.disableCustomQuest(session.userId, params.id) };
+  }
+
+  if (segments[0] === "custom-quests" && segments[1] && segments[2] === "enable" && method === "POST") {
+    rateLimit(req, `custom-quests:enable:${session.userId}`, 20, 60_000);
+    const params = uuidParamSchema.parse({ id: segments[1] });
+    return { data: await hunterService.enableCustomQuest(session.userId, params.id) };
+  }
+
+  if (segments[0] === "custom-quests" && segments[1] && method === "DELETE") {
+    rateLimit(req, `custom-quests:delete:${session.userId}`, 20, 60_000);
+    const params = uuidParamSchema.parse({ id: segments[1] });
+    return { data: await hunterService.deleteCustomQuest(session.userId, params.id) };
   }
 
   if (method === "GET" && path === "systems") {

@@ -2,6 +2,17 @@ import { z } from "zod";
 
 const questCategorySchema = z.enum(["strength", "intelligence", "vitality", "discipline", "focus", "charisma"]);
 const difficultySchema = z.enum(["easy", "medium", "hard"]);
+const recurrenceTypeSchema = z.enum(["once", "daily", "weekly", "weekdays"]);
+const weekdaySchema = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+  z.literal(5),
+  z.literal(6),
+  z.literal(7)
+]);
+const dateStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 export const telegramAuthSchema = z.object({
   initData: z.string().min(1, "Telegram initData is required"),
@@ -56,4 +67,37 @@ export const squadCreateSchema = z.object({
 
 export const squadJoinSchema = z.object({
   code: z.string().trim().min(4).max(16).regex(/^[A-Za-z0-9_-]+$/)
+});
+
+const customQuestTemplateBaseSchema = z.object({
+  title: z.string().trim().min(2).max(80),
+  description: z.string().trim().max(400).optional().default(""),
+  category: questCategorySchema,
+  difficulty: difficultySchema,
+  recurrenceType: recurrenceTypeSchema,
+  weekdays: z.array(weekdaySchema).max(7).optional().default([]),
+  startsAt: dateStringSchema.optional().nullable(),
+  endsAt: dateStringSchema.optional().nullable(),
+  isActive: z.boolean().optional()
+});
+
+export const customQuestTemplateSchema = customQuestTemplateBaseSchema
+  .superRefine((value, ctx) => {
+    if (value.recurrenceType === "weekdays" && value.weekdays.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Выбери хотя бы один день недели",
+        path: ["weekdays"]
+      });
+    }
+  });
+
+export const customQuestTemplateUpdateSchema = customQuestTemplateBaseSchema.partial().superRefine((value, ctx) => {
+  if (value.recurrenceType === "weekdays" && (!value.weekdays || value.weekdays.length === 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Выбери хотя бы один день недели",
+      path: ["weekdays"]
+    });
+  }
 });

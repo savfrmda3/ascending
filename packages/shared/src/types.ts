@@ -11,9 +11,13 @@ export type StatKey =
 export type QuestCategory = StatKey;
 export type Difficulty = "easy" | "medium" | "hard";
 export type QuestStatus = "active" | "completed" | "skipped" | "replaced";
+export type QuestType = "daily" | "generated" | "custom";
+export type QuestSource = "system" | "generated" | "custom";
 export type BossStatus = "active" | "completed" | "expired";
 export type HunterGoal = "sport" | "discipline" | "study" | "focus" | "health" | "charisma";
 export type AchievementRarity = "common" | "rare" | "epic" | "legendary";
+export type RecurrenceType = "once" | "daily" | "weekly" | "weekdays";
+export type Weekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 export type QuestTag =
   | "morning"
   | "sleep"
@@ -67,7 +71,9 @@ export interface Quest {
   userId: string;
   title: string;
   description: string;
-  type: "daily" | "generated";
+  type: QuestType;
+  source?: QuestSource | null;
+  customTemplateId?: string | null;
   category: QuestCategory;
   difficulty: Difficulty;
   xpReward: number;
@@ -80,6 +86,38 @@ export interface Quest {
   dueDate: string;
   completedAt: string | null;
   createdAt: string;
+}
+
+export interface CustomQuestTemplate {
+  id: string;
+  userId: string;
+  title: string;
+  description: string;
+  category: QuestCategory;
+  difficulty: Difficulty;
+  xpReward: number;
+  statRewardKey: StatKey;
+  statRewardValue: number;
+  recurrenceType: RecurrenceType;
+  weekdays: Weekday[];
+  startsAt: string | null;
+  endsAt: string | null;
+  isActive: boolean;
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomQuestInput {
+  title: string;
+  description?: string;
+  category: QuestCategory;
+  difficulty: Difficulty;
+  recurrenceType: RecurrenceType;
+  weekdays?: Weekday[];
+  startsAt?: string | null;
+  endsAt?: string | null;
+  isActive?: boolean;
 }
 
 export interface QuestTemplate {
